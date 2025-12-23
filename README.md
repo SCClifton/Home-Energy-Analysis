@@ -163,3 +163,38 @@ Use a local data/ folder (often a symlink to Dropbox) for raw exports and result
 
 Licence: MIT, see LICENSE
 Copyright (c) 2025 Sam Clifton
+
+## Historical baseline (Powerpal + Amber)
+
+Amber’s API provides long history for wholesale prices but only limited history for usage.
+To build a longer historical baseline, this project uses:
+
+- **Powerpal CSV exports** for usage (up to ~90 days per export, up to ~12 months history)
+- **Amber API** for wholesale prices over the same date ranges
+
+### Scripts
+
+**Powerpal usage → 5-minute kWh parquet**
+```bash
+python scripts/pull_powerpal.py --start YYYY-MM-DD --end YYYY-MM-DD
+
+Output:
+data_processed/powerpal/powerpal_usage_5min_<start>_<end>.parquet
+
+Amber prices → parquet
+python scripts/pull_historical.py --start YYYY-MM-DD --end YYYY-MM-DD --outdir data_processed
+
+Output:
+data_processed/prices_<start>_<end>.parquet
+
+Timestamp alignment
+
+Powerpal usage is aligned exactly on 5-minute boundaries (…:00).
+Amber prices often arrive with a +1 second offset (…:01).
+
+During baseline modelling, Amber price timestamps are floored to 5-minute buckets to ensure perfect alignmente data.
+
+All baseline costs are energy-only wholesale and exclude network charges, supply charges, and GST.
+
+Note: data_raw/ and data_processed/ are git-ignored and never committed.
+
