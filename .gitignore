@@ -1,3 +1,32 @@
-venv/
+# macOS
 .DS_Store
+
+# Secrets
+.env
 config/.env
+
+# Python environments
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data + outputs (keep out of git)
+data/
+Data/
+data_raw/
+data_processed/
+results/
+*.csv
+*.db
+*.parquet
+*.xlsx
+
+# Logs
+logs/
+*.log
