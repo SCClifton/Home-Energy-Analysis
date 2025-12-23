@@ -1,157 +1,155 @@
-# Home Energy Analysis
+# Home Energy Dashboard and Modelling
 
-## Overview
+This project builds a simple, glanceable home energy dashboard for the kitchen, then extends it into a modelling tool for solar, batteries, and EV charging.
 
-The **Home Energy Analysis** project aims to collect, store, analyse, and visualise energy usage data for an apartment in Vaucluse, Sydney. By leveraging the **Amber Electric** API, we will fetch live and historical energy data, perform usage and cost analyses, and generate insights to optimise energy consumption. Future development will investigate home electrification scenarios including solar, battery storage, and EV charging.
+The end goal is a small Raspberry Pi with a touchscreen mounted on the fridge that shows:
+- Current electricity price (c/kWh) from Amber
+- Estimated cost per hour (based on household usage)
+- A simple “cheap / normal / expensive” indicator
 
-## Key Objectives
+Later phases add scenario modelling using historical calendar year 2025 (or the last 12 months) to estimate the value of:
+- Rooftop solar (size options, self-consumption, exports)
+- EV charging (Tesla Model Y, 7 kW home charger), solar vs cheap grid charging
+- Vehicle-to-home behaviour (V2H), and V2G if feasible
+- Home battery (Powerwall and alternatives), including payback, ROI, and IRR
 
-1. **Data Ingestion**  
-   Securely integrate with Amber Electric’s API to fetch energy usage in near real-time or via scheduled tasks.  
-2. **Data Storage**  
-   Store usage data in a time-series database or in CSV files (locally or in cloud storage) for scalability and reliability.  
-3. **Analytics & Visualisation**  
-   Clean and transform data to uncover trends and patterns, and present them on interactive dashboards or reports.  
-4. **Alerts & Monitoring**  
-   Monitor energy usage and system performance; implement alerts for anomalies or downtime.  
-5. **Documentation & Best Practices**  
-   Maintain comprehensive documentation and follow clean code principles, DevOps, and CI/CD best practices.
+## Status
 
-## Project Plan (Phased Approach)
+Current state (local dev):
+- Flask dashboard skeleton is running (basic “Dashboard running” page)
+- Amber ingestion scripts exist and are being refactored into a cleaner client
+- Repo structure has been refactored to separate dashboard, ingestion, analysis, and Raspberry Pi deployment
 
-### Phase 1: Requirements & Design
-- Gather requirements on data granularity, retention policy, and technical constraints.  
-- Validate Amber Electric API feasibility (authentication, rate limits).  
-- Outline an architecture for data flow and select hosting environment (e.g. AWS, GCP, or local).
+Next step:
+- Create a new Amber API token and wire in a proper `amber_client.py`
 
-### Phase 2: Project Setup & Code Infrastructure
-- Initialise a Git repository with a well-defined directory structure.  
-- Set up Python or Docker environments to ensure reproducible deployments.  
-- Configure Continuous Integration (CI) with GitHub Actions to lint, test, and build the project.
+## Architecture (high level)
 
-### Phase 3: Data Ingestion & Storage
-- Implement scheduled data ingestion from Amber Electric’s API.  
-- Store raw data in CSVs (initially) and consider a time-series database (InfluxDB/TimescaleDB) as the project grows.  
-- Clean and validate data against a schema and maintain versioning for raw vs cleaned datasets.
+1. Ingestion pulls interval prices and usage from Amber.
+2. Data is stored locally (start with SQLite and/or parquet for analysis outputs).
+3. Dashboard reads the stored data and renders a simple view for the fridge screen.
+4. Modelling scripts use the same stored data to run solar, EV, and battery scenarios.
 
-### Phase 4: Analysis & Visualisation
-- Develop scripts for calculating daily, weekly, and monthly usage statistics.  
-- Create dashboards or reports to highlight consumption trends, costs, and possible savings.  
-- Integrate external data (e.g. weather) for deeper correlations.
+## Data sources
 
-### Phase 5: Monitoring & Alerting
-- Monitor system metrics (CPU, memory) and ingestion health checks.  
-- Implement anomaly detection on usage data; send alerts via Slack or email.  
-- Centralise logs and error handling for easier debugging.
+Planned and/or in progress:
+- Amber Electric API (prices, usage)
+- Powerpal (optional, likely via exports rather than direct BLE integration)
+- OpenEnergyMonitor (open alternative for real-time local metering)
+- Tessie (Tesla driving and charging history) or Tesla API where feasible
 
-### Phase 6: Documentation & Knowledge Transfer
-- Maintain a clear and structured **README.md** and code-level docstrings.  
-- Provide end-user documentation (dashboards, how-tos).  
-- Handover session or recording for any collaborators.
+## Repo structure
 
-## Project Structure
+Key folders:
+- `dashboard_app/`  
+  Flask web app (UI + API endpoints later)
+- `ingestion/`  
+  Amber client and ingestion jobs (scheduled pulls, data validation)
+- `analysis/`  
+  Modelling code, notebooks, and scenario engine (solar, battery, EV, finance)
+- `pi/`  
+  Raspberry Pi setup scripts and systemd service definitions
+- `docs/`  
+  Notes, architecture, and decisions log
 
-Below is a suggested directory layout:
-home-energy-analysis/
-├── 6th Jan Notes.rtf           # Project notes
-├── Amber_API_Documentation.rtf # API reference material
-├── Project_Plan.rtf            # Initial project planning document
-├── config/                     # Placeholder for configuration files (e.g., settings, credentials)
-├── historical_data.csv         # Consolidated historical energy data (if applicable)
-├── prices_data.csv             # Historical electricity pricing data
-├── requirements.txt            # Python dependencies
-├── src/                        # Source code directory
-│   ├── README.md               # Additional documentation (specific to src folder)
-│   ├── analysis/               # Scripts for analysing energy data
-│   ├── ingestion/              # Data ingestion and API integration scripts
-│   │   ├── amber_api.py        # Main script to interact with the Amber Electric API
-│   │   └── test_amber_api_data.py # Test script for validating Amber API data
-│   ├── processing/             # Scripts for data cleaning and transformation
-│   └── visualisation/          # Scripts for data visualisation (e.g., dashboards, plots)
-├── tests/                      # Placeholder for testing modules (unit tests, etc.)
-├── usage_data.csv              # Historical energy usage data
-└── venv/                       # Python virtual environment
-├── bin/                    # Executables and shell scripts for virtual environment activation
-├── etc/                    # Configurations for virtual environment utilities
-├── include/                # C headers for Python packages
-├── lib/                    # Libraries installed in the virtual environment
-├── pyvenv.cfg              # Virtual environment configuration file
-└── share/                  # Shared resources (e.g., Jupyter notebooks)
+Local-only (gitignored):
+- `.venv/` (Python virtual environment)
+- `data/` or `Data/` (raw exports, large files)
+- `logs/`
 
-## Current Progress
+## Local setup
 
-1. **API Integration**  
-   - Connected to Amber Electric API using a securely stored token.  
-   - Validated the site ID and tested the availability of usage and pricing data.
+### Prerequisites
+- macOS or Linux
+- Python 3.11+ recommended
+- An Amber API token (create in the Amber app)
 
-2. **Data Retrieval**  
-   - Fetched historical pricing and usage data starting from 24 June 2024.  
-   - Utilised weekly intervals to avoid hitting rate limits.
+### Create and activate a virtual environment
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 
-3. **Data Storage**  
-   - Storing raw data in `prices_data.csv` and `usage_data.csv` within the `data/` directory.  
-   - Implemented logic to append new data while preserving existing records.
+Configure environment variables
 
-4. **Testing**  
-   - Implemented a testing script (`test_amber_api_data.py`) to verify API data integrity.  
-   - Confirmed each endpoint (prices, usage, forecast) returns valid data.
+Create config/.env (not committed):
+AMBER_TOKEN=your_token_here
+AMBER_SITE_ID=optional_site_id_here
+PORT=5050
 
-5. **Next Steps**  
-   - Automate the data ingestion with cron jobs (weekly on Mondays at 2:00 AM).  
-   - Begin exploratory data analysis (EDA) to identify usage patterns and potential cost savings.  
-   - Consider transitioning from CSVs to a database solution for scalability.  
-   - Develop visual dashboards to report on real-time and historical energy usage.  
-   - Implement robust logging and anomaly alerts.
+Load it into your shell:
+set -a
+source config/.env
+set +a
 
-## Usage Instructions
+Run the dashboard
+PORT=5050 python dashboard_app/app/main.py
 
-1. **Installation**
-   - Clone the repository:  
-     ```bash
-     git clone https://github.com/YourUsername/home-energy-analysis.git
-     cd home-energy-analysis
-     ```
-   - (Optional) Create and activate a Python virtual environment:  
-     ```bash
-     python3 -m venv venv
-     source venv/bin/activate
-     ```
-   - Install dependencies:  
-     ```bash
-     pip install -r requirements.txt
-     ```
+Open:
+	•	http://localhost:5050
 
-2. **Configuration**
-   - Copy `.env.example` to `.env` and update the environment variables with your Amber Electric API credentials.  
-   - Adjust settings in `config/settings.yaml` or `config/credentials.yaml` as required.
+Raspberry Pi deployment (planned)
 
-3. **Running the Ingestion Script**
-   - Ensure your `.env` file is properly configured.  
-   - From the `home-energy-analysis` root directory:  
-     ```bash
-     python src/ingestion/amber_api.py
-     ```
-   - This script will fetch new data and store it in the `data/` directory.
+Hardware (typical):
+	•	Raspberry Pi 5 (4GB is fine for a kiosk dashboard)
+	•	5-inch DSI touchscreen
+	•	Reliable 5V USB-C supply (mains power is strongly recommended for always-on display)
 
-4. **Testing**
-   - Run tests to validate data ingestion and other functionalities:  
-     ```bash
-     pytest tests/
-     ```
+Deployment approach:
+	•	Install Raspberry Pi OS
+	•	Install project dependencies
+	•	Run the Flask app as a systemd service
+	•	Launch Chromium in kiosk mode on boot pointing to http://localhost:<port>
 
-5. **Contributing**
-   - Please open a pull request for proposed changes.  
-   - Ensure your code follows best practices for style (PEP 8 for Python) and includes documentation where appropriate.  
-   - Validate all changes with existing tests, and add new test coverage for any new features.
+All Pi-specific scripts and service files live under pi/.
 
-## Best Practices & Recommendations
+Roadmap and definition of done
 
-- **Code Style**: Use PEP 8 and automated linters (e.g. `flake8`, `black`).  
-- **Security**: Keep API tokens safe (e.g. `.env` or a secure Vault); do not commit secrets to version control.  
-- **Documentation**: Add docstrings for functions and maintain a clean, up-to-date **PROJECT_PROGRESS.md** for daily notes.  
-- **Testing**: Implement both unit and integration tests; ensure CI checks pass before merging.  
-- **Performance**: Explore a time-series database if the data volume grows significantly.
+Phase 1: Live price dashboard (Amber only)
+	•	Show current c/kWh and next interval(s)
+	•	Cache and log price history locally
+Definition of done:
+	•	Dashboard shows price and updates reliably
+	•	Ingestion runs unattended for at least 7 days
 
-## Licence
+Phase 2: Cost per hour
 
-Specify the licence under which your project is distributed, e.g. [MIT](https://opensource.org/licenses/MIT).
+Route A (Amber usage):
+	•	Use Amber interval usage if latency is acceptable
+Route B (local metering):
+	•	Use local hardware (OpenEnergyMonitor or similar) for near real-time kW
+Definition of done:
+	•	Dashboard shows cost/hour with a clear “last updated” timestamp
+
+Phase 3: Raspberry Pi fridge display
+	•	Autostart on boot, full-screen kiosk
+	•	Readable at a glance
+Definition of done:
+	•	Power cycle recovery without keyboard/mouse
+	•	Stable for at least 2 weeks of daily household use
+
+Phase 4: 2025 scenario engine (solar + battery + EV + V2H)
+	•	Build baseline 2025 bill model
+	•	Overlay solar generation, storage dispatch, EV charging, V2H rules
+Definition of done:
+	•	Scenarios produce consistent annual cost and key metrics
+	•	Results are reproducible from a single command
+
+Testing (planned)
+	•	Unit tests:
+	•	tariff and cost calculations
+	•	interval alignment and data validation
+	•	dispatch constraints (battery and EV)
+	•	Integration tests:
+	•	“pull Amber data and store it” end-to-end (mocked and live)
+	•	Sanity checks:
+	•	annual totals, seasonality, bounds checks
+
+Notes
+
+This repo deliberately keeps large datasets out of Git.
+Use a local data/ folder (often a symlink to Dropbox) for raw exports and results.
+
+MIT License
+Copyright (c) 2025 Sam Clifton
