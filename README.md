@@ -20,6 +20,16 @@ Current state (local dev):
 - Amber ingestion scripts exist and are being refactored into a cleaner client
 - Repo structure has been refactored to separate dashboard, ingestion, analysis, and Raspberry Pi deployment
 
+## Current features
+
+- Current wholesale price (c/kWh)
+- Estimated cost per hour (based on last interval)
+
+## Endpoints
+
+- /api/price
+- /api/cost
+
 Next step:
 - Create a new Amber API token and wire in a proper `amber_client.py`
 
