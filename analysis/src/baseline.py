@@ -66,7 +66,8 @@ def normalise_prices(df_prices: pd.DataFrame) -> pd.DataFrame:
     before = len(df)
 
     df["interval_start"] = pd.to_datetime(df.get("startTime"), utc=True, errors="coerce")
-    df["interval_end"] = pd.to_datetime(df.get("endTime"), utc=True, errors="coerce")
+    df["interval_start"] = df["interval_start"].dt.floor("5min")
+    df["interval_end"] = df["interval_start"] + pd.Timedelta(minutes=5)
     df["price_c_per_kwh"] = pd.to_numeric(df.get("perKwh"), errors="coerce")
 
     df = df.dropna(subset=["interval_start", "interval_end", "price_c_per_kwh"])
