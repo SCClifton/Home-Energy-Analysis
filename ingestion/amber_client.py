@@ -5,10 +5,11 @@ A clean, minimal client for interacting with the Amber Electric API.
 Designed for use in a Raspberry Pi fridge dashboard application.
 """
 
-import os
 import logging
+import os
 from datetime import datetime, date, timedelta
-from typing import Optional
+from typing import Optional, Iterable, Tuple
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -177,6 +178,103 @@ class AmberClient:
         except Exception as e:
             logger.error(f"Failed to fetch prices for site {site_id}: {str(e)}")
             raise
+
+    def _chunk_date_ranges(
+        self,
+        start_date: date,
+        end_date: date,
+        chunk_days: int = 7,
+    ) -> Iterable[Tuple[date, date]]:
+        """Yield inclusive date ranges of at most `chunk_days` length."""
+        current = start_date
+        while current <= end_date:
+            chunk_end = min(current + timedelta(days=chunk_days - 1), end_date)
+            yield current, chunk_end
+            current = chunk_end + timedelta(days=1)
+
+    def _coerce_to_date(self, dt: datetime | date) -> date:
+        if isinstance(dt, datetime):
+            return dt.date()
+        if isinstance(dt, date):
+            return dt
+        raise ValueError("start and end must be datetime or date")
+
+    def get_prices_range(
+        self,
+        site_id: str,
+        start_dt: datetime | date,
+        end_dt: datetime | date,
+    ) -> list[dict]:
+        """
+        Fetch prices over a date range, chunked to respect API limits.
+        Dates are inclusive.
+        """
+        if not site_id:
+            raise ValueError("site_id cannot be empty")
+        start_date = self._coerce_to_date(start_dt)
+        end_date = self._coerce_to_date(end_dt)
+        if start_date > end_date:
+            raise ValueError("start_dt must be on or before end_dt")
+
+        results: list[dict] = []
+        for chunk_start, chunk_end in self._chunk_date_ranges(start_date, end_date):
+            logger.info(
+                f"Fetching prices {chunk_start.isoformat()} to {chunk_end.isoformat()}"
+            )
+            data = self._request(
+                "GET",
+                f"/sites/{site_id}/prices",
+                params={
+                    "startDate": chunk_start.isoformat(),
+                    "endDate": chunk_end.isoformat(),
+                },
+            )
+            results.extend(data)
+
+        logger.info(f"Fetched {len(results)} price rows across range")
+        return results
+
+    def get_usage_range(
+        self,
+        site_id: str,
+        start_dt: datetime | date,
+        end_dt: datetime | date,
+        resolution: Optional[str] = None,
+    ) -> list[dict]:
+        """
+        Fetch usage over a date range, chunked to respect API limits.
+        Dates are inclusive. Resolution can be provided (e.g., '30' or '5').
+        """
+        if not site_id:
+            raise ValueError("site_id cannot be empty")
+        start_date = self._coerce_to_date(start_dt)
+        end_date = self._coerce_to_date(end_dt)
+        if start_date > end_date:
+            raise ValueError("start_dt must be on or before end_dt")
+
+        params_base = {}
+        if resolution:
+            params_base["resolution"] = resolution
+
+        results: list[dict] = []
+        for chunk_start, chunk_end in self._chunk_date_ranges(start_date, end_date):
+            logger.info(
+                f"Fetching usage {chunk_start.isoformat()} to {chunk_end.isoformat()}"
+            )
+            params = {
+                **params_base,
+                "startDate": chunk_start.isoformat(),
+                "endDate": chunk_end.isoformat(),
+            }
+            data = self._request(
+                "GET",
+                f"/sites/{site_id}/usage",
+                params=params,
+            )
+            results.extend(data)
+
+        logger.info(f"Fetched {len(results)} usage rows across range")
+        return results
 
     def get_prices_current(self, site_id: str) -> list[dict]:
         """
