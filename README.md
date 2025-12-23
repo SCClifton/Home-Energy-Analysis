@@ -151,5 +151,5 @@ Notes
 This repo deliberately keeps large datasets out of Git.
 Use a local data/ folder (often a symlink to Dropbox) for raw exports and results.
 
-MIT License
+Licence: MIT, see LICENSE
 Copyright (c) 2025 Sam Clifton
