@@ -95,6 +95,80 @@ def create_app() -> Flask:
         except Exception as e:
             return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
+    @app.get("/api/health")
+    def get_health():
+        """Health check endpoint returning app status and data freshness."""
+        app_time = datetime.utcnow().isoformat() + "Z"
+        data_source = "live"
+        
+        token = os.getenv("AMBER_TOKEN")
+        site_id = os.getenv("AMBER_SITE_ID")
+        
+        latest_price_interval_start = None
+        latest_usage_interval_start = None
+        data_age_seconds = None
+        status = "unknown"
+        
+        if token and site_id:
+            try:
+                client = AmberClient(token=token)
+                
+                # Get latest price interval
+                try:
+                    prices = client.get_prices_current(site_id)
+                    if prices and len(prices) > 0:
+                        latest_price_interval_start = prices[0].get("startTime")
+                except Exception:
+                    pass  # Ignore errors, will result in null
+                
+                # Get latest usage interval
+                try:
+                    usage_data = client.get_usage_recent(site_id, intervals=1)
+                    if usage_data and len(usage_data) > 0:
+                        latest_usage_interval_start = usage_data[0].get("startTime")
+                except Exception:
+                    pass  # Ignore errors, will result in null
+                
+                # Calculate data age from the most recent of price or usage
+                now = datetime.utcnow()
+                latest_interval_start = None
+                
+                if latest_price_interval_start and latest_usage_interval_start:
+                    # Use the more recent of the two
+                    price_dt = datetime.fromisoformat(latest_price_interval_start.replace("Z", "+00:00"))
+                    usage_dt = datetime.fromisoformat(latest_usage_interval_start.replace("Z", "+00:00"))
+                    latest_interval_start = max(price_dt, usage_dt)
+                elif latest_price_interval_start:
+                    latest_interval_start = datetime.fromisoformat(latest_price_interval_start.replace("Z", "+00:00"))
+                elif latest_usage_interval_start:
+                    latest_interval_start = datetime.fromisoformat(latest_usage_interval_start.replace("Z", "+00:00"))
+                
+                if latest_interval_start:
+                    # Calculate age in seconds
+                    delta = now - latest_interval_start.replace(tzinfo=None)
+                    data_age_seconds = int(delta.total_seconds())
+                    
+                    # Determine status: stale if > 15 minutes (900 seconds)
+                    if data_age_seconds > 900:
+                        status = "stale"
+                    else:
+                        status = "ok"
+                else:
+                    status = "unknown"
+                    
+            except Exception:
+                # If there's an error, status remains "unknown"
+                pass
+        
+        return jsonify({
+            "app_time": app_time,
+            "data_source": data_source,
+            "latest_price_interval_start": latest_price_interval_start,
+            "latest_usage_interval_start": latest_usage_interval_start,
+            "data_age_seconds": data_age_seconds,
+            "status": status
+        })
+
     @app.get("/")
     def index():
         """Home page with current price display."""

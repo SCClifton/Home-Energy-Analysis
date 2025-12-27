@@ -1,5 +1,11 @@
 # Project Progress
 
+## 2025-12-27
+- What changed: added GET /api/health endpoint to dashboard app for monitoring data freshness and app status.
+- Returns JSON with app_time, data_source ("live"), latest_price_interval_start, latest_usage_interval_start, data_age_seconds, and status ("ok"/"stale"/"unknown").
+- Status "stale" is defined as data_age_seconds > 15 minutes (900 seconds).
+- What was tested: endpoint returns correct JSON structure; tested with curl when app is running. Returns "unknown" status when AMBER_TOKEN/SITE_ID not configured (expected behavior).
+
 ## 2025-12-23
 
 - What changed: added cost-per-hour calculation in the dashboard UI and a new /api/cost endpoint using Amber usage data.
