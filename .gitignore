@@ -21,9 +21,11 @@ data/
 Data/
 data_raw/
 data_processed/
+data_local/
 results/
 *.csv
 *.db
+*.sqlite
 *.parquet
 *.xlsx
 
