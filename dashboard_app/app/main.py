@@ -55,13 +55,13 @@ def create_app() -> Flask:
             return jsonify({"error": "AMBER_SITE_ID environment variable is not set"}), 500
         
         cache_path = _get_cache_path()
-        data_source = "live"
         
         # Try cache first
+        cached_row = None
         try:
             cached_row = sqlite_cache.get_latest_price(cache_path, site_id, channel_type)
             if cached_row and is_fresh(cached_row["interval_start"]):
-                # Return cached data
+                # Return fresh cached data
                 response = jsonify({
                     "site_id": cached_row["site_id"],
                     "per_kwh": cached_row["per_kwh"],
@@ -71,6 +71,7 @@ def create_app() -> Flask:
                     "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 })
                 response.headers["X-Data-Source"] = "cache"
+                response.headers["X-Cache-Stale"] = "false"
                 return response
         except Exception:
             # If cache read fails, fall through to live
@@ -82,6 +83,19 @@ def create_app() -> Flask:
             prices = client.get_prices_current(site_id)
             
             if not prices:
+                # Live API returned no data, try stale cache
+                if cached_row:
+                    response = jsonify({
+                        "site_id": cached_row["site_id"],
+                        "per_kwh": cached_row["per_kwh"],
+                        "interval_start": cached_row["interval_start"],
+                        "interval_end": cached_row["interval_end"],
+                        "renewables": cached_row.get("renewables"),
+                        "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    })
+                    response.headers["X-Data-Source"] = "cache"
+                    response.headers["X-Cache-Stale"] = "true"
+                    return response
                 return jsonify({"error": "No price data available"}), 500
             
             # Pick the first interval as "current"
@@ -122,10 +136,22 @@ def create_app() -> Flask:
             })
             response.headers["X-Data-Source"] = "live"
             return response
-        except AmberAPIError as e:
+        except (AmberAPIError, Exception) as e:
+            # Live API failed: try stale cache if available
+            if cached_row:
+                response = jsonify({
+                    "site_id": cached_row["site_id"],
+                    "per_kwh": cached_row["per_kwh"],
+                    "interval_start": cached_row["interval_start"],
+                    "interval_end": cached_row["interval_end"],
+                    "renewables": cached_row.get("renewables"),
+                    "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                })
+                response.headers["X-Data-Source"] = "cache"
+                response.headers["X-Cache-Stale"] = "true"
+                return response
+            # No cache available, return error
             return jsonify({"error": f"Amber API error: {str(e)}"}), 500
-        except Exception as e:
-            return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
     @app.get("/api/cost")
     def get_cost():
@@ -140,27 +166,28 @@ def create_app() -> Flask:
             return jsonify({"error": "AMBER_SITE_ID environment variable is not set"}), 500
         
         cache_path = _get_cache_path()
-        data_source = "live"
         
         # Try cache first
+        cached_usage = None
+        cached_price = None
         try:
-            latest_usage = sqlite_cache.get_latest_usage(cache_path, site_id, channel_type)
-            if latest_usage:
-                usage_interval_start = latest_usage["interval_start"]
-                matching_price = sqlite_cache.get_price_for_interval(cache_path, site_id, usage_interval_start, channel_type)
+            cached_usage = sqlite_cache.get_latest_usage(cache_path, site_id, channel_type)
+            if cached_usage:
+                usage_interval_start = cached_usage["interval_start"]
+                cached_price = sqlite_cache.get_price_for_interval(cache_path, site_id, usage_interval_start, channel_type)
                 
-                if matching_price:
+                if cached_price:
                     # Calculate cost from cached data
-                    kwh = latest_usage["kwh"]
+                    kwh = cached_usage["kwh"]
                     # Calculate duration from interval times
-                    usage_start = parse_iso_z(latest_usage["interval_start"])
-                    usage_end = parse_iso_z(latest_usage["interval_end"])
+                    usage_start = parse_iso_z(cached_usage["interval_start"])
+                    usage_end = parse_iso_z(cached_usage["interval_end"])
                     duration_seconds = (usage_end - usage_start).total_seconds()
                     duration_minutes = duration_seconds / 60.0 if duration_seconds > 0 else 30.0
                     
                     duration_hours = duration_minutes / 60.0
                     usage_kw = kwh / duration_hours if duration_hours > 0 else 0
-                    price_per_kwh = matching_price["per_kwh"]
+                    price_per_kwh = cached_price["per_kwh"]
                     cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
                     
                     response = jsonify({
@@ -171,6 +198,7 @@ def create_app() -> Flask:
                         "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                     })
                     response.headers["X-Data-Source"] = "cache"
+                    response.headers["X-Cache-Stale"] = "false"
                     return response
         except Exception:
             # Cache read failure: fall through to live
@@ -183,6 +211,28 @@ def create_app() -> Flask:
             # Get current price
             prices = client.get_prices_current(site_id)
             if not prices:
+                # Live API returned no price, try stale cache
+                if cached_usage and cached_price:
+                    kwh = cached_usage["kwh"]
+                    usage_start = parse_iso_z(cached_usage["interval_start"])
+                    usage_end = parse_iso_z(cached_usage["interval_end"])
+                    duration_seconds = (usage_end - usage_start).total_seconds()
+                    duration_minutes = duration_seconds / 60.0 if duration_seconds > 0 else 30.0
+                    duration_hours = duration_minutes / 60.0
+                    usage_kw = kwh / duration_hours if duration_hours > 0 else 0
+                    price_per_kwh = cached_price["per_kwh"]
+                    cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
+                    
+                    response = jsonify({
+                        "cost_per_hour": cost_per_hour,
+                        "usage_kw": usage_kw,
+                        "price_per_kwh": price_per_kwh,
+                        "interval_minutes": duration_minutes,
+                        "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    })
+                    response.headers["X-Data-Source"] = "cache"
+                    response.headers["X-Cache-Stale"] = "true"
+                    return response
                 return jsonify({"error": "No price data available"}), 500
             current_price = prices[0]
             price_per_kwh = current_price.get("perKwh")
@@ -190,6 +240,28 @@ def create_app() -> Flask:
             # Get recent usage
             usage_data = client.get_usage_recent(site_id, intervals=1)
             if not usage_data:
+                # Live API returned no usage, try stale cache
+                if cached_usage and cached_price:
+                    kwh = cached_usage["kwh"]
+                    usage_start = parse_iso_z(cached_usage["interval_start"])
+                    usage_end = parse_iso_z(cached_usage["interval_end"])
+                    duration_seconds = (usage_end - usage_start).total_seconds()
+                    duration_minutes = duration_seconds / 60.0 if duration_seconds > 0 else 30.0
+                    duration_hours = duration_minutes / 60.0
+                    usage_kw = kwh / duration_hours if duration_hours > 0 else 0
+                    price_per_kwh = cached_price["per_kwh"]
+                    cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
+                    
+                    response = jsonify({
+                        "cost_per_hour": cost_per_hour,
+                        "usage_kw": usage_kw,
+                        "price_per_kwh": price_per_kwh,
+                        "interval_minutes": duration_minutes,
+                        "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    })
+                    response.headers["X-Data-Source"] = "cache"
+                    response.headers["X-Cache-Stale"] = "true"
+                    return response
                 return jsonify({"error": "No usage data available"}), 500
             
             usage_interval = usage_data[0]
@@ -248,10 +320,31 @@ def create_app() -> Flask:
             })
             response.headers["X-Data-Source"] = "live"
             return response
-        except AmberAPIError as e:
+        except (AmberAPIError, Exception) as e:
+            # Live API failed: try stale cache if available
+            if cached_usage and cached_price:
+                kwh = cached_usage["kwh"]
+                usage_start = parse_iso_z(cached_usage["interval_start"])
+                usage_end = parse_iso_z(cached_usage["interval_end"])
+                duration_seconds = (usage_end - usage_start).total_seconds()
+                duration_minutes = duration_seconds / 60.0 if duration_seconds > 0 else 30.0
+                duration_hours = duration_minutes / 60.0
+                usage_kw = kwh / duration_hours if duration_hours > 0 else 0
+                price_per_kwh = cached_price["per_kwh"]
+                cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
+                
+                response = jsonify({
+                    "cost_per_hour": cost_per_hour,
+                    "usage_kw": usage_kw,
+                    "price_per_kwh": price_per_kwh,
+                    "interval_minutes": duration_minutes,
+                    "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                })
+                response.headers["X-Data-Source"] = "cache"
+                response.headers["X-Cache-Stale"] = "true"
+                return response
+            # No cache available, return error
             return jsonify({"error": f"Amber API error: {str(e)}"}), 500
-        except Exception as e:
-            return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
     @app.get("/api/health")
     def get_health():
@@ -316,13 +409,22 @@ def create_app() -> Flask:
         
         if latest_price_interval_start and latest_usage_interval_start:
             # Use the more recent of the two
-            price_dt = parse_iso_z(latest_price_interval_start)
-            usage_dt = parse_iso_z(latest_usage_interval_start)
-            latest_interval_start = max(price_dt, usage_dt)
+            try:
+                price_dt = parse_iso_z(latest_price_interval_start)
+                usage_dt = parse_iso_z(latest_usage_interval_start)
+                latest_interval_start = max(price_dt, usage_dt)
+            except Exception:
+                pass
         elif latest_price_interval_start:
-            latest_interval_start = parse_iso_z(latest_price_interval_start)
+            try:
+                latest_interval_start = parse_iso_z(latest_price_interval_start)
+            except Exception:
+                pass
         elif latest_usage_interval_start:
-            latest_interval_start = parse_iso_z(latest_usage_interval_start)
+            try:
+                latest_interval_start = parse_iso_z(latest_usage_interval_start)
+            except Exception:
+                pass
         
         if latest_interval_start:
             # Calculate age in seconds
@@ -334,6 +436,9 @@ def create_app() -> Flask:
                 status = "stale"
             else:
                 status = "ok"
+        elif latest_price_interval_start or latest_usage_interval_start:
+            # We have cache data but couldn't parse timestamps - treat as stale
+            status = "stale"
         else:
             status = "unknown"
         

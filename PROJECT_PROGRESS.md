@@ -6,6 +6,12 @@
 - /api/cost matches usage intervals to prices by exact interval_start for accurate cost calculations.
 - Tested with curl: first call shows X-Data-Source: live, second call shows X-Data-Source: cache. Verified offline behavior (cache serves when internet unavailable).
 
+## 2025-12-28 (continued)
+- Improved resilience: /api/price and /api/cost now serve cached data (even if stale) when live Amber API fails (network errors, missing env vars, API errors).
+- Added X-Cache-Stale header (true/false) to indicate when cached data is being served but is older than 15 minutes.
+- /api/health now shows "stale" status when cache exists but is older than 15 minutes (instead of "unknown").
+- Offline behavior: Dashboard continues to function using cached data when internet is unavailable, providing graceful degradation for Raspberry Pi kitchen display.
+
 ## 2025-12-27
 - What changed: added GET /api/health endpoint to dashboard app for monitoring data freshness and app status.
 - Returns JSON with app_time, data_source ("live"), latest_price_interval_start, latest_usage_interval_start, data_age_seconds, and status ("ok"/"stale"/"unknown").
