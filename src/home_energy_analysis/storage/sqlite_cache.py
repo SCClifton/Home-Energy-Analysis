@@ -202,6 +202,88 @@ def get_latest_usage(db_path: str, site_id: str, channel_type: str = "general") 
         conn.close()
 
 
+def get_price_for_interval(db_path: str, site_id: str, interval_start: str, channel_type: str = "general") -> Optional[Dict[str, Any]]:
+    """
+    Get a price row for a specific interval.
+    
+    Args:
+        db_path: Path to the SQLite database file
+        site_id: Site ID to query
+        interval_start: Interval start time (ISO8601 string)
+        channel_type: Channel type (default: "general")
+        
+    Returns:
+        Dictionary with price data or None if not found
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT site_id, interval_start, interval_end, channel_type,
+                   per_kwh, renewables, descriptor, updated_at
+            FROM prices
+            WHERE site_id = ? AND interval_start = ? AND channel_type = ?
+            LIMIT 1
+        """, (site_id, interval_start, channel_type))
+        
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        
+        return {
+            "site_id": row[0],
+            "interval_start": row[1],
+            "interval_end": row[2],
+            "channel_type": row[3],
+            "per_kwh": row[4],
+            "renewables": row[5],
+            "descriptor": row[6],
+            "updated_at": row[7]
+        }
+    finally:
+        conn.close()
+
+
+def get_usage_for_interval(db_path: str, site_id: str, interval_start: str, channel_type: str = "general") -> Optional[Dict[str, Any]]:
+    """
+    Get a usage row for a specific interval.
+    
+    Args:
+        db_path: Path to the SQLite database file
+        site_id: Site ID to query
+        interval_start: Interval start time (ISO8601 string)
+        channel_type: Channel type (default: "general")
+        
+    Returns:
+        Dictionary with usage data or None if not found
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT site_id, interval_start, interval_end, channel_type,
+                   kwh, updated_at
+            FROM usage
+            WHERE site_id = ? AND interval_start = ? AND channel_type = ?
+            LIMIT 1
+        """, (site_id, interval_start, channel_type))
+        
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        
+        return {
+            "site_id": row[0],
+            "interval_start": row[1],
+            "interval_end": row[2],
+            "channel_type": row[3],
+            "kwh": row[4],
+            "updated_at": row[5]
+        }
+    finally:
+        conn.close()
+
+
 def prune_old_data(db_path: str, retention_days: int) -> int:
     """
     Delete rows older than the retention period.

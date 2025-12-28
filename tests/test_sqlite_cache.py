@@ -255,3 +255,97 @@ def test_prune_old_data_removes_old_rows(temp_db):
     # The old one should be gone, only recent one remains
     assert old_latest["interval_start"] == recent_date
 
+
+def test_get_price_for_interval_returns_correct_row(temp_db):
+    """Test that get_price_for_interval returns the correct price for a specific interval."""
+    site_id = "site123"
+    channel_type = "general"
+    interval_start_1 = "2025-12-28T04:50:00Z"
+    interval_end_1 = "2025-12-28T04:55:00Z"
+    interval_start_2 = "2025-12-28T04:55:00Z"
+    interval_end_2 = "2025-12-28T05:00:00Z"
+    
+    # Insert two price rows with different interval_start
+    rows = [
+        {
+            "site_id": site_id,
+            "interval_start": interval_start_1,
+            "interval_end": interval_end_1,
+            "channel_type": channel_type,
+            "per_kwh": 10.5,
+            "renewables": 50.0
+        },
+        {
+            "site_id": site_id,
+            "interval_start": interval_start_2,
+            "interval_end": interval_end_2,
+            "channel_type": channel_type,
+            "per_kwh": 15.0,
+            "renewables": 60.0
+        }
+    ]
+    sqlite_cache.upsert_prices(temp_db, rows)
+    
+    # Get price for first interval
+    result_1 = sqlite_cache.get_price_for_interval(temp_db, site_id, interval_start_1, channel_type)
+    assert result_1 is not None
+    assert result_1["interval_start"] == interval_start_1
+    assert result_1["per_kwh"] == 10.5
+    assert result_1["renewables"] == 50.0
+    
+    # Get price for second interval
+    result_2 = sqlite_cache.get_price_for_interval(temp_db, site_id, interval_start_2, channel_type)
+    assert result_2 is not None
+    assert result_2["interval_start"] == interval_start_2
+    assert result_2["per_kwh"] == 15.0
+    assert result_2["renewables"] == 60.0
+    
+    # Get price for non-existent interval
+    result_none = sqlite_cache.get_price_for_interval(temp_db, site_id, "2025-12-28T05:00:00Z", channel_type)
+    assert result_none is None
+
+
+def test_get_usage_for_interval_returns_correct_row(temp_db):
+    """Test that get_usage_for_interval returns the correct usage for a specific interval."""
+    site_id = "site123"
+    channel_type = "general"
+    interval_start_1 = "2025-12-28T04:50:00Z"
+    interval_end_1 = "2025-12-28T04:55:00Z"
+    interval_start_2 = "2025-12-28T04:55:00Z"
+    interval_end_2 = "2025-12-28T05:00:00Z"
+    
+    # Insert two usage rows with different interval_start
+    rows = [
+        {
+            "site_id": site_id,
+            "interval_start": interval_start_1,
+            "interval_end": interval_end_1,
+            "channel_type": channel_type,
+            "kwh": 2.5
+        },
+        {
+            "site_id": site_id,
+            "interval_start": interval_start_2,
+            "interval_end": interval_end_2,
+            "channel_type": channel_type,
+            "kwh": 3.0
+        }
+    ]
+    sqlite_cache.upsert_usage(temp_db, rows)
+    
+    # Get usage for first interval
+    result_1 = sqlite_cache.get_usage_for_interval(temp_db, site_id, interval_start_1, channel_type)
+    assert result_1 is not None
+    assert result_1["interval_start"] == interval_start_1
+    assert result_1["kwh"] == 2.5
+    
+    # Get usage for second interval
+    result_2 = sqlite_cache.get_usage_for_interval(temp_db, site_id, interval_start_2, channel_type)
+    assert result_2 is not None
+    assert result_2["interval_start"] == interval_start_2
+    assert result_2["kwh"] == 3.0
+    
+    # Get usage for non-existent interval
+    result_none = sqlite_cache.get_usage_for_interval(temp_db, site_id, "2025-12-28T05:00:00Z", channel_type)
+    assert result_none is None
+
