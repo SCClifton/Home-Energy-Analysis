@@ -99,6 +99,16 @@ PORT=5050 python dashboard_app/app/main.py
 Open:
 	•	http://localhost:5050
 
+### Sync cache
+Refresh the SQLite cache with latest data from Amber API:
+```bash
+set -a
+source config/.env
+set +a
+export SQLITE_PATH=./data_local/cache.sqlite
+python scripts/sync_cache.py
+```
+
 Raspberry Pi deployment (planned)
 
 Hardware (typical):
