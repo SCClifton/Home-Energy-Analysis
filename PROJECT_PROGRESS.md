@@ -1,5 +1,11 @@
 # Project Progress
 
+## 2025-12-28
+- Dashboard now uses SQLite read-through cache for /api/price and /api/cost, with X-Data-Source header, retention pruning, and /api/health based on cache when available.
+- Cache provides reliability for Raspberry Pi kitchen display: endpoints return cached data if fresh (<15 min), otherwise fetch from live Amber API and update cache.
+- /api/cost matches usage intervals to prices by exact interval_start for accurate cost calculations.
+- Tested with curl: first call shows X-Data-Source: live, second call shows X-Data-Source: cache. Verified offline behavior (cache serves when internet unavailable).
+
 ## 2025-12-27
 - What changed: added GET /api/health endpoint to dashboard app for monitoring data freshness and app status.
 - Returns JSON with app_time, data_source ("live"), latest_price_interval_start, latest_usage_interval_start, data_age_seconds, and status ("ok"/"stale"/"unknown").
