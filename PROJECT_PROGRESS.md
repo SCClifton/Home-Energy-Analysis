@@ -12,6 +12,14 @@
 - /api/health now shows "stale" status when cache exists but is older than 15 minutes (instead of "unknown").
 - Offline behavior: Dashboard continues to function using cached data when internet is unavailable, providing graceful degradation for Raspberry Pi kitchen display.
 
+## 2025-12-28 (packaging + sync)
+- Packaged SQLite cache as `home_energy_analysis.storage` using pyproject.toml so imports/tests are clean (pip install -e .).
+- Included sqlite_schema.sql as package data and updated schema loading to use importlib.resources.
+- Configured pytest in pyproject.toml to only collect tests/ (avoids Amber smoke scripts breaking pytest).
+- Added scripts/sync_cache.py to refresh SQLite cache on demand (prices + latest usage), prune old rows, and print a one-line status summary.
+- What was tested: pip install -e ., pytest (storage tests), running scripts/sync_cache.py updates cache and dashboard reads fresh cached data.
+- Next steps: enables future Pi systemd timer + kiosk deployment.
+
 ## 2025-12-27
 - What changed: added GET /api/health endpoint to dashboard app for monitoring data freshness and app status.
 - Returns JSON with app_time, data_source ("live"), latest_price_interval_start, latest_usage_interval_start, data_age_seconds, and status ("ok"/"stale"/"unknown").
