@@ -2,10 +2,18 @@
 Tests for SQLite cache module.
 """
 import os
+import sys
 import tempfile
+from pathlib import Path
 import pytest
 from datetime import datetime, timedelta, timezone
-from src.storage import sqlite_cache
+
+# Add project root to path so we can import packages
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from storage import sqlite_cache
 
 
 @pytest.fixture
