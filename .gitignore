@@ -5,33 +5,41 @@
 .env
 config/.env
 
-# Python environments
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Virtual envs
 .venv/
 venv/
 
-# Python cache
-__pycache__/
-*.pyc
-*.egg-info/
+# Test + coverage
+.pytest_cache/
+.coverage
+htmlcov/
 
-# Build artifacts
+# Packaging / build
 build/
 dist/
-.pytest_cache/
+*.egg-info/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Local cache / runtime data
+data_local/
+*.sqlite
+*.sqlite3
+*.db
 
 # Data + outputs (keep out of git)
 data/
 Data/
 data_raw/
 data_processed/
-data_local/
 results/
 *.csv
-*.db
-*.sqlite
 *.parquet
 *.xlsx
 
