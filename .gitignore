@@ -12,6 +12,12 @@ venv/
 # Python cache
 __pycache__/
 *.pyc
+*.egg-info/
+
+# Build artifacts
+build/
+dist/
+.pytest_cache/
 
 # Jupyter
 .ipynb_checkpoints/

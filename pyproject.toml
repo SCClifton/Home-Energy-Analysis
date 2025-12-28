@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "home-energy-analysis"
+version = "0.1.0"
+description = "Home energy dashboard and modelling tool"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"home_energy_analysis.storage" = ["sqlite_schema.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
