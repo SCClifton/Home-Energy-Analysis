@@ -1,5 +1,111 @@
 # Project Progress
 
+## 2025-12-29 (Raspberry Pi deployment + operations)
+
+### What changed
+- Completed end-to-end deployment of the Home Energy dashboard on a Raspberry Pi 5 as a headless appliance with optional kiosk display.
+- Raspberry Pi OS (64-bit, desktop) installed and configured with SSH-first workflow (no permanent keyboard/mouse/monitor required).
+- GitHub repo cloned to Pi and aligned to `main` branch (merged `feature/pi-sqlite-cache` into `main`).
+- Python virtual environment created on-device and project installed in editable mode (`pip install -e .`) using `pyproject.toml`.
+- Secure environment configuration added at `/etc/home-energy-analysis/dashboard.env`:
+  - `AMBER_TOKEN`, `AMBER_SITE_ID`, `PORT`, `SQLITE_PATH`, `RETENTION_DAYS`, `DEBUG`
+  - File owned by root, readable via dedicated `homeenergy` group for service user.
+- Persistent SQLite cache directory created at `/var/lib/home-energy-analysis`.
+
+### Services & scheduling
+- Added systemd service `home-energy-dashboard.service`:
+  - Starts on boot
+  - Runs Flask app under venv
+  - Restarts on failure
+  - Debug mode disabled (single process, no reloader).
+- Added systemd oneshot service + timer:
+  - `home-energy-sync-cache.service`
+  - `home-energy-sync-cache.timer` (runs every 5 minutes with jitter)
+  - Verified successful cache refresh via journald logs.
+- Verified reboot resilience:
+  - Dashboard service and cache timer both start cleanly after reboot.
+
+### Kiosk mode
+- Installed Chromium kiosk dependencies (`chromium`, `xdotool`, `unclutter`).
+- Added user-level kiosk launcher script:
+  - Waits for `/api/health` before launching browser.
+  - Launches Chromium fullscreen to `http://localhost:5050`.
+  - Disables screen blanking and hides cursor.
+- Added desktop autostart entry so kiosk launches automatically on login.
+- System is ready for permanent kitchen display mounting.
+
+### What was tested
+- SSH-only management workflow (headless operation).
+- Dashboard accessible from LAN (`http://<pi-ip>:5050`).
+- `/api/health` reports correct status.
+- Offline-first behaviour confirmed using SQLite cache.
+- systemd timer successfully refreshes cache on schedule.
+- Reboot test confirms full recovery without manual intervention.
+
+### Outcome
+- Raspberry Pi now operates as a self-healing, offline-capable energy display appliance.
+- No manual intervention required after power loss or reboot.
+- Update workflow is stable: develop on Mac → push to GitHub → `git pull` + service restart on Pi.
+
+### Next steps
+- (Optional) Add update helper script (`git pull` + restart).
+- (Optional) Swap Flask dev server for gunicorn.
+- (Optional) Add UI indicators for cache age / offline state.
+
+
+## 2025-12-29 (Raspberry Pi deployment + operations)
+
+### What changed
+- Completed end-to-end deployment of the Home Energy dashboard on a Raspberry Pi 5 as a headless appliance with optional kiosk display.
+- Raspberry Pi OS (64-bit, desktop) installed and configured with SSH-first workflow (no permanent keyboard/mouse/monitor required).
+- GitHub repo cloned to Pi and aligned to `main` branch (merged `feature/pi-sqlite-cache` into `main`).
+- Python virtual environment created on-device and project installed in editable mode (`pip install -e .`) using `pyproject.toml`.
+- Secure environment configuration added at `/etc/home-energy-analysis/dashboard.env`:
+  - `AMBER_TOKEN`, `AMBER_SITE_ID`, `PORT`, `SQLITE_PATH`, `RETENTION_DAYS`, `DEBUG`
+  - File owned by root, readable via dedicated `homeenergy` group for service user.
+- Persistent SQLite cache directory created at `/var/lib/home-energy-analysis`.
+
+### Services & scheduling
+- Added systemd service `home-energy-dashboard.service`:
+  - Starts on boot
+  - Runs Flask app under venv
+  - Restarts on failure
+  - Debug mode disabled (single process, no reloader).
+- Added systemd oneshot service + timer:
+  - `home-energy-sync-cache.service`
+  - `home-energy-sync-cache.timer` (runs every 5 minutes with jitter)
+  - Verified successful cache refresh via journald logs.
+- Verified reboot resilience:
+  - Dashboard service and cache timer both start cleanly after reboot.
+
+### Kiosk mode
+- Installed Chromium kiosk dependencies (`chromium`, `xdotool`, `unclutter`).
+- Added user-level kiosk launcher script:
+  - Waits for `/api/health` before launching browser.
+  - Launches Chromium fullscreen to `http://localhost:5050`.
+  - Disables screen blanking and hides cursor.
+- Added desktop autostart entry so kiosk launches automatically on login.
+- System is ready for permanent kitchen display mounting.
+
+### What was tested
+- SSH-only management workflow (headless operation).
+- Dashboard accessible from LAN (`http://<pi-ip>:5050`).
+- `/api/health` reports correct status.
+- Offline-first behaviour confirmed using SQLite cache.
+- systemd timer successfully refreshes cache on schedule.
+- Reboot test confirms full recovery without manual intervention.
+
+### Outcome
+- Raspberry Pi now operates as a self-healing, offline-capable energy display appliance.
+- No manual intervention required after power loss or reboot.
+- Update workflow is stable: develop on Mac → push to GitHub → `git pull` + service restart on Pi.
+
+### Next steps
+- (Optional) Add update helper script (`git pull` + restart).
+- (Optional) Swap Flask dev server for gunicorn.
+- (Optional) Add UI indicators for cache age / offline state.
+
+
 ## 2025-12-28
 - Dashboard now uses SQLite read-through cache for /api/price and /api/cost, with X-Data-Source header, retention pruning, and /api/health based on cache when available.
 - Cache provides reliability for Raspberry Pi kitchen display: endpoints return cached data if fresh (<15 min), otherwise fetch from live Amber API and update cache.
