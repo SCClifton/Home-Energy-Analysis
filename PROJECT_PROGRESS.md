@@ -1,5 +1,50 @@
 # Project Progress
 
+## 2025-12-31 (UI overhaul, live-first price + forecast, Pi deployment)
+
+### What shipped
+
+* Implemented a new kiosk UI layout inspired by v0:
+
+  * Large price orb (left), right-side cards, clean header (LIVE/CACHED) and 12-hour clock, footer status line.
+  * Added “NEXT 3 HOURS” forecast visual with 7 downsampled points (Now, +30m … +180m), price labels, and “now” marker.
+  * All timestamps displayed in 12-hour time with AM/PM.
+* Switched price behaviour to **live-first**:
+
+  * `/api/price` now fetches live Amber first with a short timeout, then falls back to SQLite cache.
+  * Response includes `X-Data-Source: live|cache` and UI “LIVE/CACHED” pill uses this.
+* Added forecast support:
+
+  * New `/api/forecast` endpoint (default 3 hours, clamped 1–6) that fetches upcoming intervals from Amber and caches them.
+  * UI renders forecast bars and basic “insight” messaging (spike expected, rising, dropping) to support appliance timing decisions.
+* Improved cache and health correctness:
+
+  * `/api/health` now avoids selecting future forecast intervals when calculating price age (prevents negative `price_age_seconds`).
+  * Added tests covering “future intervals exist” health behaviour.
+* Persisted cost in cached usage and totals:
+
+  * SQLite usage table extended (idempotent migration) to store `cost_aud` (from Amber usage `cost`), plus quality/channel metadata.
+  * `/api/totals` sums `usage.cost_aud` for month-to-date and returns “as of” timestamp, with `is_delayed` when usage is stale.
+* Pi deployment updates:
+
+  * Pi update flow confirmed: `git pull` (or `git restore` then pull if needed) → `./pi/update.sh` → restart services.
+  * Dashboard service now respects `DEBUG=0` from `/etc/home-energy-analysis/dashboard.env` (debug mode off on Pi).
+  * Verified services active and endpoints healthy on Pi (`/api/health`, `/api/price`, `/api/forecast?hours=3`, `/api/totals`).
+
+### Current status
+
+* Backend runs reliably on Pi via systemd, cache sync timer active.
+* UI is working and displaying live price + 3-hour forecast + MTD totals with clear “as of” for delayed usage.
+* Chromium kiosk auto-start on reboot is not yet reliable, for now Chromium is launched manually when needed.
+
+### Next steps
+
+* Final UI spacing tweaks based on the actual Pi 5" screen (avoid over-optimising for laptop display).
+* Make kiosk startup deterministic (either robust desktop autostart or a dedicated systemd kiosk service that waits for `/api/health` then launches Chromium).
+* Optional: refine forecast “insight” copy and rules (keep it simple and family-friendly).
+
+
+
 ## 2025-12-31 (Cache-first logic, timestamp normalisation, and data correctness)
 
 ### What changed
