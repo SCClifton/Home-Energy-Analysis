@@ -7,6 +7,7 @@ Fetches current price and latest usage data and updates the cache.
 import os
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
 
 # Add project root to path to import amber_client
 project_root = Path(__file__).parent.parent
@@ -15,6 +16,48 @@ sys.path.insert(0, str(project_root))
 from ingestion.amber_client import AmberClient, AmberAPIError
 from home_energy_analysis.storage.factory import get_sqlite_cache
 from home_energy_analysis.storage import sqlite_cache
+
+
+def parse_iso_z(ts: str) -> datetime:
+    """Parse ISO8601 timestamp with trailing 'Z' to datetime."""
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
+def floor_to_5min(dt: datetime) -> datetime:
+    """
+    Floor a datetime to the nearest 5-minute boundary in UTC.
+    Strip seconds and microseconds.
+    
+    Args:
+        dt: Datetime to floor (assumed to be timezone-aware, will convert to UTC)
+        
+    Returns:
+        Datetime floored to 5-minute boundary in UTC
+    """
+    # Ensure UTC
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    
+    # Floor to 5-minute boundary: remove seconds/microseconds, floor minute
+    floored_minute = (dt.minute // 5) * 5
+    return dt.replace(minute=floored_minute, second=0, microsecond=0)
+
+
+def normalize_interval_timestamp(ts: str) -> str:
+    """
+    Normalize an ISO8601 timestamp string to a 5-minute boundary.
+    
+    Args:
+        ts: ISO8601 timestamp string (e.g., "2024-01-01T01:50:01Z")
+        
+    Returns:
+        Normalized ISO8601 timestamp string (e.g., "2024-01-01T01:50:00Z")
+    """
+    dt = parse_iso_z(ts)
+    normalized = floor_to_5min(dt)
+    return normalized.isoformat().replace("+00:00", "Z")
 
 
 def main():
@@ -51,10 +94,16 @@ def main():
         if prices and len(prices) > 0:
             # Transform price data to cache row format
             for price in prices:
+                # Normalize timestamps before caching
+                interval_start_raw = price.get("startTime")
+                interval_end_raw = price.get("endTime")
+                interval_start = normalize_interval_timestamp(interval_start_raw)
+                interval_end = normalize_interval_timestamp(interval_end_raw)
+                
                 price_row = {
                     "site_id": site_id,
-                    "interval_start": price.get("startTime"),
-                    "interval_end": price.get("endTime"),
+                    "interval_start": interval_start,
+                    "interval_end": interval_end,
                     "channel_type": channel_type,
                     "per_kwh": price.get("perKwh"),
                     "renewables": price.get("renewables"),
@@ -62,8 +111,8 @@ def main():
                 }
                 price_rows.append(price_row)
             
-            # Get latest price timestamp (first one is most recent)
-            latest_price_ts = prices[0].get("startTime")
+            # Get latest price timestamp (first one is most recent, normalized)
+            latest_price_ts = normalize_interval_timestamp(prices[0].get("startTime"))
         
         # Fetch latest usage (same as dashboard uses)
         usage_data = client.get_usage_recent(site_id, intervals=1)
@@ -74,17 +123,23 @@ def main():
         if usage_data and len(usage_data) > 0:
             # Transform usage data to cache row format
             for usage in usage_data:
+                # Normalize timestamps before caching
+                interval_start_raw = usage.get("startTime")
+                interval_end_raw = usage.get("endTime")
+                interval_start = normalize_interval_timestamp(interval_start_raw)
+                interval_end = normalize_interval_timestamp(interval_end_raw)
+                
                 usage_row = {
                     "site_id": site_id,
-                    "interval_start": usage.get("startTime"),
-                    "interval_end": usage.get("endTime"),
+                    "interval_start": interval_start,
+                    "interval_end": interval_end,
                     "channel_type": channel_type,
                     "kwh": usage.get("kwh")
                 }
                 usage_rows.append(usage_row)
             
-            # Get latest usage timestamp
-            latest_usage_ts = usage_data[0].get("startTime")
+            # Get latest usage timestamp (normalized)
+            latest_usage_ts = normalize_interval_timestamp(usage_data[0].get("startTime"))
         
         # Upsert prices
         if price_rows:

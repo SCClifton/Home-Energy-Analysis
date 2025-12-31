@@ -349,3 +349,50 @@ def test_get_usage_for_interval_returns_correct_row(temp_db):
     result_none = sqlite_cache.get_usage_for_interval(temp_db, site_id, "2025-12-28T05:00:00Z", channel_type)
     assert result_none is None
 
+
+def test_get_price_for_interval_legacy_timestamp_support(temp_db):
+    """Test that get_price_for_interval can read legacy :01Z timestamps when querying for :00Z."""
+    site_id = "site123"
+    channel_type = "general"
+    
+    # Insert a row with legacy :01Z timestamp (legacy pattern)
+    legacy_interval_start = "2025-12-29T09:40:01Z"
+    legacy_interval_end = "2025-12-29T09:45:01Z"
+    
+    rows = [{
+        "site_id": site_id,
+        "interval_start": legacy_interval_start,
+        "interval_end": legacy_interval_end,
+        "channel_type": channel_type,
+        "per_kwh": 25.5,
+        "renewables": 75.0
+    }]
+    sqlite_cache.upsert_prices(temp_db, rows)
+    
+    # Query for normalized :00Z timestamp - should find the legacy :01Z row
+    normalized_interval_start = "2025-12-29T09:40:00Z"
+    result = sqlite_cache.get_price_for_interval(temp_db, site_id, normalized_interval_start, channel_type)
+    
+    assert result is not None
+    assert result["interval_start"] == legacy_interval_start  # Returns the stored :01Z value
+    assert result["per_kwh"] == 25.5
+    assert result["renewables"] == 75.0
+    
+    # Also test that exact :00Z match is preferred if both exist
+    # Insert a normalized :00Z row for the same interval
+    normalized_rows = [{
+        "site_id": site_id,
+        "interval_start": normalized_interval_start,
+        "interval_end": "2025-12-29T09:45:00Z",
+        "channel_type": channel_type,
+        "per_kwh": 30.0,
+        "renewables": 80.0
+    }]
+    sqlite_cache.upsert_prices(temp_db, normalized_rows)
+    
+    # Query should return the :00Z row (exact match preferred)
+    result2 = sqlite_cache.get_price_for_interval(temp_db, site_id, normalized_interval_start, channel_type)
+    assert result2 is not None
+    assert result2["interval_start"] == normalized_interval_start  # Returns :00Z, not :01Z
+    assert result2["per_kwh"] == 30.0
+

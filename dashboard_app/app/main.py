@@ -28,6 +28,43 @@ def parse_iso_z(ts: str) -> datetime:
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
 
+def floor_to_5min(dt: datetime) -> datetime:
+    """
+    Floor a datetime to the nearest 5-minute boundary in UTC.
+    Strip seconds and microseconds.
+    
+    Args:
+        dt: Datetime to floor (assumed to be timezone-aware, will convert to UTC)
+        
+    Returns:
+        Datetime floored to 5-minute boundary in UTC
+    """
+    # Ensure UTC
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    
+    # Floor to 5-minute boundary: remove seconds/microseconds, floor minute
+    floored_minute = (dt.minute // 5) * 5
+    return dt.replace(minute=floored_minute, second=0, microsecond=0)
+
+
+def normalize_interval_timestamp(ts: str) -> str:
+    """
+    Normalize an ISO8601 timestamp string to a 5-minute boundary.
+    
+    Args:
+        ts: ISO8601 timestamp string (e.g., "2024-01-01T01:50:01Z")
+        
+    Returns:
+        Normalized ISO8601 timestamp string (e.g., "2024-01-01T01:50:00Z")
+    """
+    dt = parse_iso_z(ts)
+    normalized = floor_to_5min(dt)
+    return normalized.isoformat().replace("+00:00", "Z")
+
+
 def is_fresh(interval_start: str, max_age_seconds: int = 900) -> bool:
     """Check if an interval_start timestamp is within max_age_seconds of now (UTC)."""
     try:
@@ -49,24 +86,29 @@ def create_app() -> Flask:
         site_id = os.getenv("AMBER_SITE_ID")
         channel_type = "general"
         
-        if not token:
-            return jsonify({"error": "AMBER_TOKEN environment variable is not set"}), 500
         if not site_id:
             return jsonify({"error": "AMBER_SITE_ID environment variable is not set"}), 500
         
         cache_path = _get_cache_path()
         
-        # Try cache first
+        # Compute current 5-minute interval
+        now_utc = datetime.now(timezone.utc)
+        current_interval_start = floor_to_5min(now_utc)
+        current_interval_start_str = current_interval_start.isoformat().replace("+00:00", "Z")
+        
+        # Try to get price for current interval
         cached_row = None
         try:
-            cached_row = sqlite_cache.get_latest_price(cache_path, site_id, channel_type)
-            if cached_row and is_fresh(cached_row["interval_start"]):
-                # Return fresh cached data
+            cached_row = sqlite_cache.get_price_for_interval(cache_path, site_id, current_interval_start_str, channel_type)
+            if cached_row:
+                # Found exact interval match - normalize timestamps defensively before returning
+                interval_start = normalize_interval_timestamp(cached_row["interval_start"])
+                interval_end = normalize_interval_timestamp(cached_row["interval_end"])
                 response = jsonify({
                     "site_id": cached_row["site_id"],
                     "per_kwh": cached_row["per_kwh"],
-                    "interval_start": cached_row["interval_start"],
-                    "interval_end": cached_row["interval_end"],
+                    "interval_start": interval_start,
+                    "interval_end": interval_end,
                     "renewables": cached_row.get("renewables"),
                     "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 })
@@ -74,34 +116,52 @@ def create_app() -> Flask:
                 response.headers["X-Cache-Stale"] = "false"
                 return response
         except Exception:
-            # If cache read fails, fall through to live
+            # If cache read fails, fall through
             pass
         
-        # Cache miss or stale: fetch from live API
+        # Current interval not found: try latest cached price as fallback
+        try:
+            cached_row = sqlite_cache.get_latest_price(cache_path, site_id, channel_type)
+            if cached_row:
+                # Normalize timestamps defensively before returning
+                interval_start = normalize_interval_timestamp(cached_row["interval_start"])
+                interval_end = normalize_interval_timestamp(cached_row["interval_end"])
+                response = jsonify({
+                    "site_id": cached_row["site_id"],
+                    "per_kwh": cached_row["per_kwh"],
+                    "interval_start": interval_start,
+                    "interval_end": interval_end,
+                    "renewables": cached_row.get("renewables"),
+                    "is_stale": True,
+                    "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                })
+                response.headers["X-Data-Source"] = "cache"
+                response.headers["X-Cache-Stale"] = "true"
+                return response
+        except Exception:
+            # If cache read fails, fall through
+            pass
+        
+        # Cache miss: only try live API if token is available
+        if not token:
+            return jsonify({"error": "AMBER_TOKEN environment variable is not set"}), 500
+        
         try:
             client = AmberClient(token=token)
             prices = client.get_prices_current(site_id)
             
             if not prices:
-                # Live API returned no data, try stale cache
-                if cached_row:
-                    response = jsonify({
-                        "site_id": cached_row["site_id"],
-                        "per_kwh": cached_row["per_kwh"],
-                        "interval_start": cached_row["interval_start"],
-                        "interval_end": cached_row["interval_end"],
-                        "renewables": cached_row.get("renewables"),
-                        "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                    })
-                    response.headers["X-Data-Source"] = "cache"
-                    response.headers["X-Cache-Stale"] = "true"
-                    return response
+                # Live API returned no data, return error
                 return jsonify({"error": "No price data available"}), 500
             
             # Pick the first interval as "current"
             current = prices[0]
-            interval_start = current.get("startTime")
-            interval_end = current.get("endTime")
+            interval_start_raw = current.get("startTime")
+            interval_end_raw = current.get("endTime")
+            
+            # Normalize timestamps before caching
+            interval_start = normalize_interval_timestamp(interval_start_raw)
+            interval_end = normalize_interval_timestamp(interval_end_raw)
             
             # Cache the price row
             try:
@@ -139,12 +199,16 @@ def create_app() -> Flask:
         except (AmberAPIError, Exception) as e:
             # Live API failed: try stale cache if available
             if cached_row:
+                # Normalize timestamps defensively before returning
+                interval_start = normalize_interval_timestamp(cached_row["interval_start"])
+                interval_end = normalize_interval_timestamp(cached_row["interval_end"])
                 response = jsonify({
                     "site_id": cached_row["site_id"],
                     "per_kwh": cached_row["per_kwh"],
-                    "interval_start": cached_row["interval_start"],
-                    "interval_end": cached_row["interval_end"],
+                    "interval_start": interval_start,
+                    "interval_end": interval_end,
                     "renewables": cached_row.get("renewables"),
+                    "is_stale": True,
                     "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 })
                 response.headers["X-Data-Source"] = "cache"
@@ -160,197 +224,167 @@ def create_app() -> Flask:
         site_id = os.getenv("AMBER_SITE_ID")
         channel_type = "general"
         
-        if not token:
-            return jsonify({"error": "AMBER_TOKEN environment variable is not set"}), 500
         if not site_id:
             return jsonify({"error": "AMBER_SITE_ID environment variable is not set"}), 500
         
         cache_path = _get_cache_path()
+        now_utc = datetime.now(timezone.utc)
         
-        # Try cache first
-        cached_usage = None
+        # Get current price (same logic as /api/price)
+        current_interval_start = floor_to_5min(now_utc)
+        current_interval_start_str = current_interval_start.isoformat().replace("+00:00", "Z")
+        
         cached_price = None
         try:
-            cached_usage = sqlite_cache.get_latest_usage(cache_path, site_id, channel_type)
-            if cached_usage:
-                usage_interval_start = cached_usage["interval_start"]
-                cached_price = sqlite_cache.get_price_for_interval(cache_path, site_id, usage_interval_start, channel_type)
-                
-                if cached_price:
-                    # Calculate cost from cached data
-                    kwh = cached_usage["kwh"]
-                    # Calculate duration from interval times
-                    usage_start = parse_iso_z(cached_usage["interval_start"])
-                    usage_end = parse_iso_z(cached_usage["interval_end"])
-                    duration_seconds = (usage_end - usage_start).total_seconds()
-                    duration_minutes = duration_seconds / 60.0 if duration_seconds > 0 else 30.0
-                    
-                    duration_hours = duration_minutes / 60.0
-                    usage_kw = kwh / duration_hours if duration_hours > 0 else 0
-                    price_per_kwh = cached_price["per_kwh"]
-                    cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
-                    
-                    response = jsonify({
-                        "cost_per_hour": cost_per_hour,
-                        "usage_kw": usage_kw,
-                        "price_per_kwh": price_per_kwh,
-                        "interval_minutes": duration_minutes,
-                        "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                    })
-                    response.headers["X-Data-Source"] = "cache"
-                    response.headers["X-Cache-Stale"] = "false"
-                    return response
+            cached_price = sqlite_cache.get_price_for_interval(cache_path, site_id, current_interval_start_str, channel_type)
+            # Normalize timestamps defensively when reading from cache
+            if cached_price:
+                cached_price["interval_start"] = normalize_interval_timestamp(cached_price["interval_start"])
+                cached_price["interval_end"] = normalize_interval_timestamp(cached_price["interval_end"])
         except Exception:
-            # Cache read failure: fall through to live
             pass
         
-        # Cache miss: fetch from live API
-        try:
-            client = AmberClient(token=token)
-            
-            # Get current price
-            prices = client.get_prices_current(site_id)
-            if not prices:
-                # Live API returned no price, try stale cache
-                if cached_usage and cached_price:
-                    kwh = cached_usage["kwh"]
-                    usage_start = parse_iso_z(cached_usage["interval_start"])
-                    usage_end = parse_iso_z(cached_usage["interval_end"])
-                    duration_seconds = (usage_end - usage_start).total_seconds()
-                    duration_minutes = duration_seconds / 60.0 if duration_seconds > 0 else 30.0
-                    duration_hours = duration_minutes / 60.0
-                    usage_kw = kwh / duration_hours if duration_hours > 0 else 0
-                    price_per_kwh = cached_price["per_kwh"]
-                    cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
-                    
-                    response = jsonify({
-                        "cost_per_hour": cost_per_hour,
-                        "usage_kw": usage_kw,
-                        "price_per_kwh": price_per_kwh,
-                        "interval_minutes": duration_minutes,
-                        "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                    })
-                    response.headers["X-Data-Source"] = "cache"
-                    response.headers["X-Cache-Stale"] = "true"
-                    return response
+        if not cached_price:
+            try:
+                cached_price = sqlite_cache.get_latest_price(cache_path, site_id, channel_type)
+                # Normalize timestamps defensively when reading from cache
+                if cached_price:
+                    cached_price["interval_start"] = normalize_interval_timestamp(cached_price["interval_start"])
+                    cached_price["interval_end"] = normalize_interval_timestamp(cached_price["interval_end"])
+            except Exception:
+                pass
+        
+        # If still no price, try live API only if token is available
+        if not cached_price:
+            if not token:
                 return jsonify({"error": "No price data available"}), 500
-            current_price = prices[0]
-            price_per_kwh = current_price.get("perKwh")
-            
-            # Get recent usage
-            usage_data = client.get_usage_recent(site_id, intervals=1)
-            if not usage_data:
-                # Live API returned no usage, try stale cache
-                if cached_usage and cached_price:
-                    kwh = cached_usage["kwh"]
-                    usage_start = parse_iso_z(cached_usage["interval_start"])
-                    usage_end = parse_iso_z(cached_usage["interval_end"])
-                    duration_seconds = (usage_end - usage_start).total_seconds()
-                    duration_minutes = duration_seconds / 60.0 if duration_seconds > 0 else 30.0
-                    duration_hours = duration_minutes / 60.0
-                    usage_kw = kwh / duration_hours if duration_hours > 0 else 0
-                    price_per_kwh = cached_price["per_kwh"]
-                    cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
+            try:
+                client = AmberClient(token=token)
+                prices = client.get_prices_current(site_id)
+                if prices:
+                    current = prices[0]
+                    interval_start_raw = current.get("startTime")
+                    interval_end_raw = current.get("endTime")
+                    interval_start = normalize_interval_timestamp(interval_start_raw)
+                    interval_end = normalize_interval_timestamp(interval_end_raw)
                     
-                    response = jsonify({
-                        "cost_per_hour": cost_per_hour,
-                        "usage_kw": usage_kw,
-                        "price_per_kwh": price_per_kwh,
-                        "interval_minutes": duration_minutes,
-                        "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                    })
-                    response.headers["X-Data-Source"] = "cache"
-                    response.headers["X-Cache-Stale"] = "true"
-                    return response
+                    cached_price = {
+                        "per_kwh": current.get("perKwh"),
+                        "interval_start": interval_start,
+                        "interval_end": interval_end
+                    }
+                    
+                    # Cache it
+                    try:
+                        cache_row = {
+                            "site_id": site_id,
+                            "interval_start": interval_start,
+                            "interval_end": interval_end,
+                            "channel_type": channel_type,
+                            "per_kwh": current.get("perKwh"),
+                            "renewables": current.get("renewables"),
+                            "descriptor": current.get("descriptor")
+                        }
+                        sqlite_cache.upsert_prices(cache_path, [cache_row])
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        
+        if not cached_price:
+            return jsonify({"error": "No price data available"}), 500
+        
+        price_per_kwh = cached_price["per_kwh"]
+        
+        # Get latest usage
+        cached_usage = None
+        try:
+            cached_usage = sqlite_cache.get_latest_usage(cache_path, site_id, channel_type)
+            # Normalize timestamps defensively when reading from cache
+            if cached_usage:
+                cached_usage["interval_start"] = normalize_interval_timestamp(cached_usage["interval_start"])
+                cached_usage["interval_end"] = normalize_interval_timestamp(cached_usage["interval_end"])
+        except Exception:
+            pass
+        
+        # If no usage in cache, try live API only if token is available
+        if not cached_usage:
+            if not token:
                 return jsonify({"error": "No usage data available"}), 500
-            
-            usage_interval = usage_data[0]
-            kwh = usage_interval.get("kwh")
-            duration_minutes = usage_interval.get("duration", 30)  # Default to 30 if not provided
-            usage_interval_start = usage_interval.get("startTime")
-            usage_interval_end = usage_interval.get("endTime")
-            
-            # Calculate usage in kW (power)
-            # kWh / (duration in hours) = kW
-            duration_hours = duration_minutes / 60.0
-            usage_kw = kwh / duration_hours if duration_hours > 0 else 0
-            
-            # Calculate cost per hour
-            # cost_per_hour = usage_kw * price_per_kwh (in cents)
-            cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
-            
-            # Cache the usage and price rows
             try:
-                usage_cache_row = {
-                    "site_id": site_id,
-                    "interval_start": usage_interval_start,
-                    "interval_end": usage_interval_end,
-                    "channel_type": channel_type,
-                    "kwh": kwh
-                }
-                sqlite_cache.upsert_usage(cache_path, [usage_cache_row])
-                
-                price_cache_row = {
-                    "site_id": site_id,
-                    "interval_start": usage_interval_start,  # Match usage interval
-                    "interval_end": usage_interval_end,
-                    "channel_type": channel_type,
-                    "per_kwh": price_per_kwh,
-                    "renewables": current_price.get("renewables"),
-                    "descriptor": current_price.get("descriptor")
-                }
-                sqlite_cache.upsert_prices(cache_path, [price_cache_row])
-            except Exception:
-                # Cache write failure is non-fatal
-                pass
-            
-            # Prune old data (non-blocking)
-            try:
-                retention_days = int(os.getenv("RETENTION_DAYS", "14"))
-                sqlite_cache.prune_old_data(cache_path, retention_days)
+                client = AmberClient(token=token)
+                usage_data = client.get_usage_recent(site_id, intervals=1)
+                if usage_data:
+                    usage_interval = usage_data[0]
+                    interval_start_raw = usage_interval.get("startTime")
+                    interval_end_raw = usage_interval.get("endTime")
+                    interval_start = normalize_interval_timestamp(interval_start_raw)
+                    interval_end = normalize_interval_timestamp(interval_end_raw)
+                    
+                    cached_usage = {
+                        "kwh": usage_interval.get("kwh"),
+                        "interval_start": interval_start,
+                        "interval_end": interval_end
+                    }
+                    
+                    # Cache it
+                    try:
+                        usage_cache_row = {
+                            "site_id": site_id,
+                            "interval_start": interval_start,
+                            "interval_end": interval_end,
+                            "channel_type": channel_type,
+                            "kwh": usage_interval.get("kwh")
+                        }
+                        sqlite_cache.upsert_usage(cache_path, [usage_cache_row])
+                    except Exception:
+                        pass
             except Exception:
                 pass
-            
-            response = jsonify({
-                "cost_per_hour": cost_per_hour,
-                "usage_kw": usage_kw,
-                "price_per_kwh": price_per_kwh,
-                "interval_minutes": duration_minutes,
-                "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-            })
-            response.headers["X-Data-Source"] = "live"
-            return response
-        except (AmberAPIError, Exception) as e:
-            # Live API failed: try stale cache if available
-            if cached_usage and cached_price:
-                kwh = cached_usage["kwh"]
-                usage_start = parse_iso_z(cached_usage["interval_start"])
-                usage_end = parse_iso_z(cached_usage["interval_end"])
-                duration_seconds = (usage_end - usage_start).total_seconds()
-                duration_minutes = duration_seconds / 60.0 if duration_seconds > 0 else 30.0
-                duration_hours = duration_minutes / 60.0
-                usage_kw = kwh / duration_hours if duration_hours > 0 else 0
-                price_per_kwh = cached_price["per_kwh"]
-                cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
-                
-                response = jsonify({
-                    "cost_per_hour": cost_per_hour,
-                    "usage_kw": usage_kw,
-                    "price_per_kwh": price_per_kwh,
-                    "interval_minutes": duration_minutes,
-                    "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                })
-                response.headers["X-Data-Source"] = "cache"
-                response.headers["X-Cache-Stale"] = "true"
-                return response
-            # No cache available, return error
-            return jsonify({"error": f"Amber API error: {str(e)}"}), 500
+        
+        if not cached_usage:
+            return jsonify({"error": "No usage data available"}), 500
+        
+        # Calculate cost
+        kwh = cached_usage["kwh"]
+        usage_start = parse_iso_z(cached_usage["interval_start"])
+        usage_end = parse_iso_z(cached_usage["interval_end"])
+        duration_seconds = (usage_end - usage_start).total_seconds()
+        duration_minutes = duration_seconds / 60.0 if duration_seconds > 0 else 5.0
+        duration_hours = duration_minutes / 60.0
+        usage_kw = kwh / duration_hours if duration_hours > 0 else 0
+        cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
+        
+        # Calculate usage age
+        usage_interval_start_dt = parse_iso_z(cached_usage["interval_start"])
+        usage_age_seconds = int((now_utc - usage_interval_start_dt).total_seconds())
+        
+        # Determine if usage is stale (threshold: 15 minutes = 900 seconds)
+        usage_is_stale = usage_age_seconds > 900
+        
+        # Normalize timestamps defensively before returning (already normalized, but ensure consistency)
+        usage_interval_start_normalized = normalize_interval_timestamp(cached_usage["interval_start"])
+        
+        response_data = {
+            "cost_per_hour": cost_per_hour,
+            "usage_kw": usage_kw,
+            "price_per_kwh": price_per_kwh,
+            "usage_interval_start": usage_interval_start_normalized,
+            "usage_age_seconds": usage_age_seconds,
+            "is_estimated": usage_is_stale,
+            "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        }
+        
+        response = jsonify(response_data)
+        response.headers["X-Data-Source"] = "cache" if cached_usage and cached_price else "live"
+        response.headers["X-Cache-Stale"] = "true" if usage_is_stale else "false"
+        return response
 
     @app.get("/api/health")
     def get_health():
         """Health check endpoint returning app status and data freshness."""
         app_time = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        data_source = "live"
+        data_source = "cache"
         
         token = os.getenv("AMBER_TOKEN")
         site_id = os.getenv("AMBER_SITE_ID")
@@ -358,27 +392,40 @@ def create_app() -> Flask:
         
         latest_price_interval_start = None
         latest_usage_interval_start = None
-        data_age_seconds = None
+        price_age_seconds = None
+        usage_age_seconds = None
         status = "unknown"
         
         # Try cache first
         cache_path = _get_cache_path()
+        now = datetime.now(timezone.utc)
+        
         try:
             cached_price = sqlite_cache.get_latest_price(cache_path, site_id, channel_type)
             if cached_price:
                 latest_price_interval_start = cached_price["interval_start"]
-                data_source = "cache"
-            
+                try:
+                    price_dt = parse_iso_z(latest_price_interval_start)
+                    price_age_seconds = int((now - price_dt).total_seconds())
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        
+        try:
             cached_usage = sqlite_cache.get_latest_usage(cache_path, site_id, channel_type)
             if cached_usage:
                 latest_usage_interval_start = cached_usage["interval_start"]
-                data_source = "cache"
+                try:
+                    usage_dt = parse_iso_z(latest_usage_interval_start)
+                    usage_age_seconds = int((now - usage_dt).total_seconds())
+                except Exception:
+                    pass
         except Exception:
-            # Cache read failure: fall through to live
             pass
         
         # If cache is empty, fall back to live API
-        if not latest_price_interval_start and not latest_usage_interval_start and token and site_id:
+        if (price_age_seconds is None and usage_age_seconds is None) and token and site_id:
             try:
                 client = AmberClient(token=token)
                 
@@ -387,58 +434,45 @@ def create_app() -> Flask:
                     prices = client.get_prices_current(site_id)
                     if prices and len(prices) > 0:
                         latest_price_interval_start = prices[0].get("startTime")
+                        try:
+                            price_dt = parse_iso_z(latest_price_interval_start)
+                            price_age_seconds = int((now - price_dt).total_seconds())
+                        except Exception:
+                            pass
                         data_source = "live"
                 except Exception:
-                    pass  # Ignore errors, will result in null
+                    pass
                 
                 # Get latest usage interval
                 try:
                     usage_data = client.get_usage_recent(site_id, intervals=1)
                     if usage_data and len(usage_data) > 0:
                         latest_usage_interval_start = usage_data[0].get("startTime")
+                        try:
+                            usage_dt = parse_iso_z(latest_usage_interval_start)
+                            usage_age_seconds = int((now - usage_dt).total_seconds())
+                        except Exception:
+                            pass
                         data_source = "live"
                 except Exception:
-                    pass  # Ignore errors, will result in null
-            except Exception:
-                # If there's an error, status remains "unknown"
-                pass
-        
-        # Calculate data age from the most recent of price or usage
-        now = datetime.now(timezone.utc)
-        latest_interval_start = None
-        
-        if latest_price_interval_start and latest_usage_interval_start:
-            # Use the more recent of the two
-            try:
-                price_dt = parse_iso_z(latest_price_interval_start)
-                usage_dt = parse_iso_z(latest_usage_interval_start)
-                latest_interval_start = max(price_dt, usage_dt)
-            except Exception:
-                pass
-        elif latest_price_interval_start:
-            try:
-                latest_interval_start = parse_iso_z(latest_price_interval_start)
-            except Exception:
-                pass
-        elif latest_usage_interval_start:
-            try:
-                latest_interval_start = parse_iso_z(latest_usage_interval_start)
+                    pass
             except Exception:
                 pass
         
-        if latest_interval_start:
-            # Calculate age in seconds
-            delta = now - latest_interval_start
-            data_age_seconds = int(delta.total_seconds())
-            
-            # Determine status: stale if > 15 minutes (900 seconds)
-            if data_age_seconds > 900:
-                status = "stale"
-            else:
+        # Determine status: ok only if BOTH are fresh (threshold: 15 minutes = 900 seconds)
+        threshold_seconds = 900
+        if price_age_seconds is not None and usage_age_seconds is not None:
+            if price_age_seconds <= threshold_seconds and usage_age_seconds <= threshold_seconds:
                 status = "ok"
-        elif latest_price_interval_start or latest_usage_interval_start:
-            # We have cache data but couldn't parse timestamps - treat as stale
-            status = "stale"
+            else:
+                status = "stale"
+        elif price_age_seconds is not None or usage_age_seconds is not None:
+            # Only one metric available - check if it's fresh
+            available_age = price_age_seconds if price_age_seconds is not None else usage_age_seconds
+            if available_age <= threshold_seconds:
+                status = "ok"
+            else:
+                status = "stale"
         else:
             status = "unknown"
         
@@ -447,7 +481,8 @@ def create_app() -> Flask:
             "data_source": data_source,
             "latest_price_interval_start": latest_price_interval_start,
             "latest_usage_interval_start": latest_usage_interval_start,
-            "data_age_seconds": data_age_seconds,
+            "price_age_seconds": price_age_seconds,
+            "usage_age_seconds": usage_age_seconds,
             "status": status
         })
 

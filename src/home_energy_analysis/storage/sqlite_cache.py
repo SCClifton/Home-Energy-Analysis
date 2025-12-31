@@ -206,10 +206,13 @@ def get_price_for_interval(db_path: str, site_id: str, interval_start: str, chan
     """
     Get a price row for a specific interval.
     
+    Supports legacy :01Z timestamps by trying exact match first, then +1 second fallback.
+    This allows reading cached rows with legacy :01Z timestamps when querying for :00Z.
+    
     Args:
         db_path: Path to the SQLite database file
         site_id: Site ID to query
-        interval_start: Interval start time (ISO8601 string)
+        interval_start: Interval start time (ISO8601 string, normalized :00Z)
         channel_type: Channel type (default: "general")
         
     Returns:
@@ -218,6 +221,8 @@ def get_price_for_interval(db_path: str, site_id: str, interval_start: str, chan
     conn = sqlite3.connect(db_path)
     try:
         cursor = conn.cursor()
+        
+        # Try exact match first (preferred :00Z format)
         cursor.execute("""
             SELECT site_id, interval_start, interval_end, channel_type,
                    per_kwh, renewables, descriptor, updated_at
@@ -225,6 +230,36 @@ def get_price_for_interval(db_path: str, site_id: str, interval_start: str, chan
             WHERE site_id = ? AND interval_start = ? AND channel_type = ?
             LIMIT 1
         """, (site_id, interval_start, channel_type))
+        
+        row = cursor.fetchone()
+        if row is not None:
+            return {
+                "site_id": row[0],
+                "interval_start": row[1],
+                "interval_end": row[2],
+                "channel_type": row[3],
+                "per_kwh": row[4],
+                "renewables": row[5],
+                "descriptor": row[6],
+                "updated_at": row[7]
+            }
+        
+        # Fallback: try legacy :01Z pattern (target + 1 second)
+        # Parse ISO timestamp, add 1 second, format back
+        try:
+            dt = datetime.fromisoformat(interval_start.replace("Z", "+00:00"))
+            legacy_interval_start = (dt + timedelta(seconds=1)).isoformat().replace("+00:00", "Z")
+        except Exception:
+            # If parsing fails, return None
+            return None
+        
+        cursor.execute("""
+            SELECT site_id, interval_start, interval_end, channel_type,
+                   per_kwh, renewables, descriptor, updated_at
+            FROM prices
+            WHERE site_id = ? AND interval_start = ? AND channel_type = ?
+            LIMIT 1
+        """, (site_id, legacy_interval_start, channel_type))
         
         row = cursor.fetchone()
         if row is None:
@@ -248,10 +283,13 @@ def get_usage_for_interval(db_path: str, site_id: str, interval_start: str, chan
     """
     Get a usage row for a specific interval.
     
+    Supports legacy :01Z timestamps by trying exact match first, then +1 second fallback.
+    This allows reading cached rows with legacy :01Z timestamps when querying for :00Z.
+    
     Args:
         db_path: Path to the SQLite database file
         site_id: Site ID to query
-        interval_start: Interval start time (ISO8601 string)
+        interval_start: Interval start time (ISO8601 string, normalized :00Z)
         channel_type: Channel type (default: "general")
         
     Returns:
@@ -260,6 +298,8 @@ def get_usage_for_interval(db_path: str, site_id: str, interval_start: str, chan
     conn = sqlite3.connect(db_path)
     try:
         cursor = conn.cursor()
+        
+        # Try exact match first (preferred :00Z format)
         cursor.execute("""
             SELECT site_id, interval_start, interval_end, channel_type,
                    kwh, updated_at
@@ -267,6 +307,34 @@ def get_usage_for_interval(db_path: str, site_id: str, interval_start: str, chan
             WHERE site_id = ? AND interval_start = ? AND channel_type = ?
             LIMIT 1
         """, (site_id, interval_start, channel_type))
+        
+        row = cursor.fetchone()
+        if row is not None:
+            return {
+                "site_id": row[0],
+                "interval_start": row[1],
+                "interval_end": row[2],
+                "channel_type": row[3],
+                "kwh": row[4],
+                "updated_at": row[5]
+            }
+        
+        # Fallback: try legacy :01Z pattern (target + 1 second)
+        # Parse ISO timestamp, add 1 second, format back
+        try:
+            dt = datetime.fromisoformat(interval_start.replace("Z", "+00:00"))
+            legacy_interval_start = (dt + timedelta(seconds=1)).isoformat().replace("+00:00", "Z")
+        except Exception:
+            # If parsing fails, return None
+            return None
+        
+        cursor.execute("""
+            SELECT site_id, interval_start, interval_end, channel_type,
+                   kwh, updated_at
+            FROM usage
+            WHERE site_id = ? AND interval_start = ? AND channel_type = ?
+            LIMIT 1
+        """, (site_id, legacy_interval_start, channel_type))
         
         row = cursor.fetchone()
         if row is None:
