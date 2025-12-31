@@ -183,7 +183,10 @@ def main():
                     "interval_start": interval_start,
                     "interval_end": interval_end,
                     "channel_type": channel_type,
-                    "kwh": usage.get("kwh")
+                    "kwh": usage.get("kwh"),
+                    "cost_aud": usage.get("cost"),  # Amber API returns "cost" in AUD including GST
+                    "quality": usage.get("quality"),
+                    "channel_identifier": usage.get("channelIdentifier")
                 }
                 usage_rows.append(usage_row)
             

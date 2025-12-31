@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS usage (
     interval_end TEXT NOT NULL,
     channel_type TEXT NOT NULL,
     kwh REAL NOT NULL,
+    cost_aud REAL,
+    quality TEXT,
+    channel_identifier TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (site_id, interval_start, channel_type)
 );

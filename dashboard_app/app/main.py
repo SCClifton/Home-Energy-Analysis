@@ -25,6 +25,12 @@ def _get_cache_path():
     return _cache_path
 
 
+def _reset_cache_path():
+    """Reset the cached path (useful for testing)."""
+    global _cache_path
+    _cache_path = None
+
+
 def parse_iso_z(ts: str) -> datetime:
     """Parse ISO8601 timestamp with trailing 'Z' to datetime."""
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -83,7 +89,7 @@ def create_app() -> Flask:
 
     @app.get("/api/price")
     def get_price():
-        """Fetch current price from Amber API with read-through cache."""
+        """Fetch current price from Amber API (live-first) with cache fallback."""
         token = os.getenv("AMBER_TOKEN")
         site_id = os.getenv("AMBER_SITE_ID")
         channel_type = "general"
@@ -98,126 +104,238 @@ def create_app() -> Flask:
         current_interval_start = floor_to_5min(now_utc)
         current_interval_start_str = current_interval_start.isoformat().replace("+00:00", "Z")
         
-        # Try to get price for current interval
+        # Try live API first if credentials are available
         cached_row = None
+        if token:
+            try:
+                # Create client with short timeout for responsiveness
+                client = AmberClient(token=token, timeout=2)
+                prices = client.get_prices_current(site_id)
+                
+                if prices:
+                    # Find the "general" channel interval for current
+                    current = None
+                    for price in prices:
+                        if price.get("channelType") == channel_type or price.get("channelType") == "general":
+                            # Check if this is the current interval
+                            price_start = price.get("startTime")
+                            if price_start:
+                                price_start_normalized = normalize_interval_timestamp(price_start)
+                                if price_start_normalized == current_interval_start_str:
+                                    current = price
+                                    break
+                    
+                    # If no exact match, use first interval
+                    if not current and prices:
+                        current = prices[0]
+                    
+                    if current:
+                        interval_start_raw = current.get("startTime")
+                        interval_end_raw = current.get("endTime")
+                        
+                        # Normalize timestamps before caching
+                        interval_start = normalize_interval_timestamp(interval_start_raw)
+                        interval_end = normalize_interval_timestamp(interval_end_raw)
+                        
+                        # Cache the price row
+                        try:
+                            cache_row = {
+                                "site_id": site_id,
+                                "interval_start": interval_start,
+                                "interval_end": interval_end,
+                                "channel_type": channel_type,
+                                "per_kwh": current.get("perKwh"),
+                                "renewables": current.get("renewables"),
+                                "descriptor": current.get("descriptor")
+                            }
+                            sqlite_cache.upsert_prices(cache_path, [cache_row])
+                        except Exception:
+                            # Cache write failure is non-fatal
+                            pass
+                        
+                        response = jsonify({
+                            "site_id": site_id,
+                            "per_kwh": current.get("perKwh"),
+                            "interval_start": interval_start,
+                            "interval_end": interval_end,
+                            "renewables": current.get("renewables"),
+                            "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                        })
+                        response.headers["X-Data-Source"] = "live"
+                        response.headers["X-Cache-Stale"] = "false"
+                        return response
+            except (AmberAPIError, Exception) as e:
+                # Live API failed - fall through to cache
+                pass
+        
+        # Fallback to cache: try exact interval first
         try:
             cached_row = sqlite_cache.get_price_for_interval(cache_path, site_id, current_interval_start_str, channel_type)
             if cached_row:
-                # Found exact interval match - normalize timestamps defensively before returning
                 interval_start = normalize_interval_timestamp(cached_row["interval_start"])
                 interval_end = normalize_interval_timestamp(cached_row["interval_end"])
+                
+                # Calculate age
+                cached_dt = parse_iso_z(interval_end)
+                age_seconds = int((now_utc - cached_dt).total_seconds())
+                is_stale = age_seconds > 900
+                
                 response = jsonify({
                     "site_id": cached_row["site_id"],
                     "per_kwh": cached_row["per_kwh"],
                     "interval_start": interval_start,
                     "interval_end": interval_end,
                     "renewables": cached_row.get("renewables"),
+                    "is_stale": is_stale,
                     "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 })
                 response.headers["X-Data-Source"] = "cache"
-                response.headers["X-Cache-Stale"] = "false"
+                response.headers["X-Cache-Stale"] = "true" if is_stale else "false"
                 return response
         except Exception:
-            # If cache read fails, fall through
             pass
         
-        # Current interval not found: try latest cached price as fallback
+        # Try latest cached price as final fallback
         try:
             cached_row = sqlite_cache.get_latest_price(cache_path, site_id, channel_type)
             if cached_row:
-                # Normalize timestamps defensively before returning
                 interval_start = normalize_interval_timestamp(cached_row["interval_start"])
                 interval_end = normalize_interval_timestamp(cached_row["interval_end"])
+                
+                # Calculate age
+                cached_dt = parse_iso_z(interval_end)
+                age_seconds = int((now_utc - cached_dt).total_seconds())
+                is_stale = age_seconds > 900
+                
                 response = jsonify({
                     "site_id": cached_row["site_id"],
                     "per_kwh": cached_row["per_kwh"],
                     "interval_start": interval_start,
                     "interval_end": interval_end,
                     "renewables": cached_row.get("renewables"),
-                    "is_stale": True,
+                    "is_stale": is_stale,
                     "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 })
                 response.headers["X-Data-Source"] = "cache"
-                response.headers["X-Cache-Stale"] = "true"
+                response.headers["X-Cache-Stale"] = "true" if is_stale else "false"
                 return response
         except Exception:
-            # If cache read fails, fall through
             pass
         
-        # Cache miss: only try live API if token is available
-        if not token:
-            return jsonify({"error": "AMBER_TOKEN environment variable is not set"}), 500
+        # No data available
+        return jsonify({"error": "No price data available"}), 500
+
+    @app.get("/api/forecast")
+    def get_forecast():
+        """Fetch forecast prices (live-first) with cache fallback."""
+        from flask import request
         
+        token = os.getenv("AMBER_TOKEN")
+        site_id = os.getenv("AMBER_SITE_ID")
+        channel_type = "general"
+        
+        if not site_id:
+            return jsonify({"error": "AMBER_SITE_ID environment variable is not set"}), 500
+        
+        # Parse hours parameter (default 2, clamp 1-6)
         try:
-            client = AmberClient(token=token)
-            prices = client.get_prices_current(site_id)
-            
-            if not prices:
-                # Live API returned no data, return error
-                return jsonify({"error": "No price data available"}), 500
-            
-            # Pick the first interval as "current"
-            current = prices[0]
-            interval_start_raw = current.get("startTime")
-            interval_end_raw = current.get("endTime")
-            
-            # Normalize timestamps before caching
-            interval_start = normalize_interval_timestamp(interval_start_raw)
-            interval_end = normalize_interval_timestamp(interval_end_raw)
-            
-            # Cache the price row
+            hours = int(request.args.get("hours", 2))
+            hours = max(1, min(6, hours))
+        except (ValueError, TypeError):
+            hours = 2
+        
+        # Calculate number of intervals needed (assuming 5-minute intervals)
+        # For 30-minute intervals, this would be hours * 2, but we'll use 5-min as default
+        intervals_needed = hours * 12  # 12 intervals per hour for 5-minute intervals
+        
+        cache_path = _get_cache_path()
+        now_utc = datetime.now(timezone.utc)
+        
+        # Try live API first if credentials are available
+        if token:
             try:
-                cache_row = {
-                    "site_id": site_id,
-                    "interval_start": interval_start,
-                    "interval_end": interval_end,
-                    "channel_type": channel_type,
-                    "per_kwh": current.get("perKwh"),
-                    "renewables": current.get("renewables"),
-                    "descriptor": current.get("descriptor")
-                }
-                sqlite_cache.upsert_prices(cache_path, [cache_row])
-            except Exception:
-                # Cache write failure is non-fatal
+                client = AmberClient(token=token, timeout=2)
+                forecast_prices = client.get_prices_forecast(site_id, next_intervals=intervals_needed)
+                
+                if forecast_prices:
+                    # Filter to "general" channel and normalize
+                    forecast_intervals = []
+                    cache_rows = []
+                    
+                    for price in forecast_prices:
+                        price_channel = price.get("channelType") or price.get("channel_type")
+                        if price_channel == channel_type or price_channel == "general":
+                            interval_start_raw = price.get("startTime")
+                            interval_end_raw = price.get("endTime")
+                            
+                            if interval_start_raw and interval_end_raw:
+                                interval_start = normalize_interval_timestamp(interval_start_raw)
+                                interval_end = normalize_interval_timestamp(interval_end_raw)
+                                
+                                # Only include future intervals
+                                if parse_iso_z(interval_start) > now_utc:
+                                    forecast_intervals.append({
+                                        "start": interval_start,
+                                        "end": interval_end,
+                                        "per_kwh": price.get("perKwh"),
+                                        "descriptor": price.get("descriptor"),
+                                        "spikeStatus": price.get("spikeStatus"),
+                                        "renewables": price.get("renewables")
+                                    })
+                                    
+                                    cache_rows.append({
+                                        "site_id": site_id,
+                                        "interval_start": interval_start,
+                                        "interval_end": interval_end,
+                                        "channel_type": channel_type,
+                                        "per_kwh": price.get("perKwh"),
+                                        "renewables": price.get("renewables"),
+                                        "descriptor": price.get("descriptor")
+                                    })
+                    
+                    # Cache the forecast intervals
+                    if cache_rows:
+                        try:
+                            sqlite_cache.upsert_prices(cache_path, cache_rows)
+                        except Exception:
+                            pass
+                    
+                    if forecast_intervals:
+                        response = jsonify({"intervals": forecast_intervals})
+                        response.headers["X-Data-Source"] = "live"
+                        return response
+            except (AmberAPIError, Exception) as e:
+                # Live API failed - fall through to cache
                 pass
-            
-            # Prune old data (non-blocking)
-            try:
-                retention_days = int(os.getenv("RETENTION_DAYS", "14"))
-                sqlite_cache.prune_old_data(cache_path, retention_days)
-            except Exception:
-                pass
-            
-            response = jsonify({
-                "site_id": site_id,
-                "per_kwh": current.get("perKwh"),
-                "interval_start": interval_start,
-                "interval_end": interval_end,
-                "renewables": current.get("renewables"),
-                "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-            })
-            response.headers["X-Data-Source"] = "live"
-            return response
-        except (AmberAPIError, Exception) as e:
-            # Live API failed: try stale cache if available
-            if cached_row:
-                # Normalize timestamps defensively before returning
-                interval_start = normalize_interval_timestamp(cached_row["interval_start"])
-                interval_end = normalize_interval_timestamp(cached_row["interval_end"])
-                response = jsonify({
-                    "site_id": cached_row["site_id"],
-                    "per_kwh": cached_row["per_kwh"],
-                    "interval_start": interval_start,
-                    "interval_end": interval_end,
-                    "renewables": cached_row.get("renewables"),
-                    "is_stale": True,
-                    "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                })
-                response.headers["X-Data-Source"] = "cache"
-                response.headers["X-Cache-Stale"] = "true"
-                return response
-            # No cache available, return error
-            return jsonify({"error": f"Amber API error: {str(e)}"}), 500
+        
+        # Fallback to cache
+        try:
+            cached_forecast = sqlite_cache.get_forecast_intervals(cache_path, site_id, channel_type, max_intervals=intervals_needed)
+            if cached_forecast:
+                intervals = []
+                for row in cached_forecast:
+                    interval_start = normalize_interval_timestamp(row["interval_start"])
+                    interval_end = normalize_interval_timestamp(row["interval_end"])
+                    
+                    # Only include future intervals
+                    if parse_iso_z(interval_start) > now_utc:
+                        intervals.append({
+                            "start": interval_start,
+                            "end": interval_end,
+                            "per_kwh": row["per_kwh"],
+                            "descriptor": row.get("descriptor"),
+                            "renewables": row.get("renewables")
+                        })
+                
+                if intervals:
+                    response = jsonify({"intervals": intervals})
+                    response.headers["X-Data-Source"] = "cache"
+                    return response
+        except Exception:
+            pass
+        
+        # No forecast data available
+        return jsonify({"intervals": [], "message": "No forecast data available"}), 200
 
     @app.get("/api/cost")
     def get_cost():
@@ -309,41 +427,7 @@ def create_app() -> Flask:
         except Exception:
             pass
         
-        # If no usage in cache, try live API only if token is available
-        if not cached_usage:
-            if not token:
-                return jsonify({"error": "No usage data available"}), 500
-            try:
-                client = AmberClient(token=token)
-                usage_data = client.get_usage_recent(site_id, intervals=1)
-                if usage_data:
-                    usage_interval = usage_data[0]
-                    interval_start_raw = usage_interval.get("startTime")
-                    interval_end_raw = usage_interval.get("endTime")
-                    interval_start = normalize_interval_timestamp(interval_start_raw)
-                    interval_end = normalize_interval_timestamp(interval_end_raw)
-                    
-                    cached_usage = {
-                        "kwh": usage_interval.get("kwh"),
-                        "interval_start": interval_start,
-                        "interval_end": interval_end
-                    }
-                    
-                    # Cache it
-                    try:
-                        usage_cache_row = {
-                            "site_id": site_id,
-                            "interval_start": interval_start,
-                            "interval_end": interval_end,
-                            "channel_type": channel_type,
-                            "kwh": usage_interval.get("kwh")
-                        }
-                        sqlite_cache.upsert_usage(cache_path, [usage_cache_row])
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        
+        # Cache-only: return error if no usage data available
         if not cached_usage:
             return jsonify({"error": "No usage data available"}), 500
         
@@ -378,7 +462,7 @@ def create_app() -> Flask:
         }
         
         response = jsonify(response_data)
-        response.headers["X-Data-Source"] = "cache" if cached_usage and cached_price else "live"
+        response.headers["X-Data-Source"] = "cache"
         response.headers["X-Cache-Stale"] = "true" if usage_is_stale else "false"
         return response
 
@@ -401,26 +485,31 @@ def create_app() -> Flask:
         # Try cache first
         cache_path = _get_cache_path()
         now = datetime.now(timezone.utc)
+        now_iso = now.isoformat().replace("+00:00", "Z")
         
         try:
-            cached_price = sqlite_cache.get_latest_price(cache_path, site_id, channel_type)
+            cached_price = sqlite_cache.get_latest_price(cache_path, site_id, channel_type, max_interval_start=now_iso)
             if cached_price:
                 latest_price_interval_start = cached_price["interval_start"]
                 try:
                     price_dt = parse_iso_z(latest_price_interval_start)
                     price_age_seconds = int((now - price_dt).total_seconds())
+                    # Safety clamp: prevent negative ages
+                    price_age_seconds = max(0, price_age_seconds)
                 except Exception:
                     pass
         except Exception:
             pass
         
         try:
-            cached_usage = sqlite_cache.get_latest_usage(cache_path, site_id, channel_type)
+            cached_usage = sqlite_cache.get_latest_usage(cache_path, site_id, channel_type, max_interval_start=now_iso)
             if cached_usage:
                 latest_usage_interval_start = cached_usage["interval_start"]
                 try:
                     usage_dt = parse_iso_z(latest_usage_interval_start)
                     usage_age_seconds = int((now - usage_dt).total_seconds())
+                    # Safety clamp: prevent negative ages
+                    usage_age_seconds = max(0, usage_age_seconds)
                 except Exception:
                     pass
         except Exception:
@@ -490,12 +579,22 @@ def create_app() -> Flask:
 
     @app.get("/api/totals")
     def get_totals():
-        """Get month-to-date cost totals from cache."""
+        """Get month-to-date cost totals from cache using usage.cost_aud."""
         site_id = os.getenv("AMBER_SITE_ID")
         channel_type = "general"
         
+        # Cache-only: return empty result if site_id missing, don't error
         if not site_id:
-            return jsonify({"error": "AMBER_SITE_ID environment variable is not set"}), 500
+            return jsonify({
+                "month_to_date_cost_aud": None,
+                "as_of_interval_end": None,
+                "intervals_count": 0,
+                "missing_price_intervals": 0,
+                "missing_usage_intervals": 0,
+                "usage_age_seconds": None,
+                "is_delayed": False,
+                "message": "AMBER_SITE_ID not set"
+            })
         
         cache_path = _get_cache_path()
         
@@ -513,29 +612,41 @@ def create_app() -> Flask:
             conn = sqlite3.connect(cache_path)
             cursor = conn.cursor()
             
-            # Query usage and price joined by interval_start
-            # Only include intervals where both usage and price exist
+            # Query usage rows with cost_aud for current month
+            # Filter to channel_type == "general" and cost_aud IS NOT NULL
             cursor.execute("""
                 SELECT 
-                    u.interval_start,
-                    u.interval_end,
-                    u.kwh,
-                    p.per_kwh
-                FROM usage u
-                INNER JOIN prices p ON 
-                    u.site_id = p.site_id AND
-                    u.interval_start = p.interval_start AND
-                    u.channel_type = p.channel_type
+                    interval_start,
+                    interval_end,
+                    cost_aud
+                FROM usage
                 WHERE 
-                    u.site_id = ? AND
-                    u.channel_type = ? AND
-                    u.interval_start >= ?
-                ORDER BY u.interval_start ASC
+                    site_id = ? AND
+                    channel_type = ? AND
+                    interval_start >= ? AND
+                    cost_aud IS NOT NULL
+                ORDER BY interval_start ASC
             """, (site_id, channel_type, month_start_utc_str))
             
             rows = cursor.fetchall()
             
-            # Also get latest usage interval_end for "as of" timestamp
+            # Get latest usage interval_end for "as of" timestamp (from rows with cost_aud)
+            cursor.execute("""
+                SELECT interval_end
+                FROM usage
+                WHERE 
+                    site_id = ? AND
+                    channel_type = ? AND
+                    interval_start >= ? AND
+                    cost_aud IS NOT NULL
+                ORDER BY interval_start DESC
+                LIMIT 1
+            """, (site_id, channel_type, month_start_utc_str))
+            
+            latest_usage_row = cursor.fetchone()
+            as_of_interval_end = latest_usage_row[0] if latest_usage_row else None
+            
+            # Get usage age from latest usage interval (any usage, not just with cost)
             cursor.execute("""
                 SELECT interval_end
                 FROM usage
@@ -544,61 +655,25 @@ def create_app() -> Flask:
                 LIMIT 1
             """, (site_id, channel_type, month_start_utc_str))
             
-            latest_usage_row = cursor.fetchone()
-            as_of_interval_end = latest_usage_row[0] if latest_usage_row else None
-            
-            # Get usage age from latest usage interval
+            latest_any_usage = cursor.fetchone()
             usage_age_seconds = None
-            if latest_usage_row:
+            if latest_any_usage:
                 try:
-                    latest_usage_dt = parse_iso_z(latest_usage_row[0])
+                    latest_usage_dt = parse_iso_z(latest_any_usage[0])
                     usage_age_seconds = int((now_utc - latest_usage_dt).total_seconds())
                 except Exception:
                     pass
             
-            # Count missing intervals
-            cursor.execute("""
-                SELECT COUNT(DISTINCT u.interval_start)
-                FROM usage u
-                LEFT JOIN prices p ON 
-                    u.site_id = p.site_id AND
-                    u.interval_start = p.interval_start AND
-                    u.channel_type = p.channel_type
-                WHERE 
-                    u.site_id = ? AND
-                    u.channel_type = ? AND
-                    u.interval_start >= ? AND
-                    p.interval_start IS NULL
-            """, (site_id, channel_type, month_start_utc_str))
-            
-            missing_price_count = cursor.fetchone()[0] or 0
-            
-            cursor.execute("""
-                SELECT COUNT(DISTINCT p.interval_start)
-                FROM prices p
-                LEFT JOIN usage u ON 
-                    p.site_id = u.site_id AND
-                    p.interval_start = u.interval_start AND
-                    p.channel_type = u.channel_type
-                WHERE 
-                    p.site_id = ? AND
-                    p.channel_type = ? AND
-                    p.interval_start >= ? AND
-                    u.interval_start IS NULL
-            """, (site_id, channel_type, month_start_utc_str))
-            
-            missing_usage_count = cursor.fetchone()[0] or 0
-            
             conn.close()
             
-            # Calculate totals
+            # Calculate totals from cost_aud
             if not rows:
                 return jsonify({
                     "month_to_date_cost_aud": None,
                     "as_of_interval_end": None,
                     "intervals_count": 0,
-                    "missing_price_intervals": missing_price_count,
-                    "missing_usage_intervals": missing_usage_count,
+                    "missing_price_intervals": 0,
+                    "missing_usage_intervals": 0,
                     "usage_age_seconds": usage_age_seconds,
                     "is_delayed": usage_age_seconds is not None and usage_age_seconds > 1800,
                     "message": "Waiting for usage data"
@@ -606,9 +681,8 @@ def create_app() -> Flask:
             
             total_cost_aud = 0.0
             for row in rows:
-                interval_start, interval_end, kwh, per_kwh = row
-                if kwh is not None and per_kwh is not None:
-                    cost_aud = kwh * (per_kwh / 100.0)
+                interval_start, interval_end, cost_aud = row
+                if cost_aud is not None:
                     total_cost_aud += cost_aud
             
             # Determine if delayed (usage is lagging or very stale)
@@ -620,14 +694,24 @@ def create_app() -> Flask:
                 "month_to_date_cost_aud": round(total_cost_aud, 2),
                 "as_of_interval_end": as_of_interval_end,
                 "intervals_count": len(rows),
-                "missing_price_intervals": missing_price_count,
-                "missing_usage_intervals": missing_usage_count,
+                "missing_price_intervals": 0,  # No longer relevant - using cost_aud
+                "missing_usage_intervals": 0,  # No longer relevant - using cost_aud
                 "usage_age_seconds": usage_age_seconds,
                 "is_delayed": is_delayed
             })
             
         except Exception as e:
-            return jsonify({"error": f"Failed to calculate totals: {str(e)}"}), 500
+            # Return empty result on error, don't throw 500
+            return jsonify({
+                "month_to_date_cost_aud": None,
+                "as_of_interval_end": None,
+                "intervals_count": 0,
+                "missing_price_intervals": 0,
+                "missing_usage_intervals": 0,
+                "usage_age_seconds": None,
+                "is_delayed": False,
+                "message": f"Error: {str(e)}"
+            })
 
     @app.get("/")
     def index():

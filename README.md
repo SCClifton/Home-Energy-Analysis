@@ -101,12 +101,20 @@ Open:
 
 ### Sync cache
 Refresh the SQLite cache with latest data from Amber API:
+
+**Note:** This requires `AMBER_TOKEN` and `AMBER_SITE_ID` to be loaded from `config/.env`.
+
 ```bash
 set -a
 source config/.env
 set +a
-export SQLITE_PATH=./data_local/cache.sqlite
+export SQLITE_PATH="$PWD/data_local/cache.sqlite"
 python scripts/sync_cache.py
+```
+
+Test the endpoint:
+```bash
+curl -s http://127.0.0.1:5050/api/totals | python -m json.tool
 ```
 
 Raspberry Pi deployment (planned)

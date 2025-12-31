@@ -3,57 +3,112 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Energy Dashboard</title>
+    <title>Home Energy Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
 </head>
 <body>
-    <!-- Top status strip -->
-    <div class="status-strip">
-        <div class="badge" id="price-badge">
-            <span class="badge-label">Price:</span>
-            <span class="badge-value" id="price-status">-</span>
-        </div>
-        <div class="badge" id="usage-badge">
-            <span class="badge-label">Usage:</span>
-            <span class="badge-value" id="usage-status">-</span>
-        </div>
-        <div class="badge" id="mode-badge" style="display: none;">
-            <span class="badge-label">Mode:</span>
-            <span class="badge-value" id="mode-status">-</span>
-        </div>
-    </div>
+  <div class="kiosk">
+    <div class="bg-grid"></div>
 
-    <!-- Main hero circle -->
-    <div class="hero-container">
-        <div class="hero-circle" id="hero-circle">
-            <div class="circle-content">
-                <div class="circle-title" id="circle-title">LIVE 5 MIN PRICE</div>
-                <div class="circle-time" id="circle-time">Current interval</div>
-                <div class="circle-price">
-                    <span class="price-value" id="price-value">--</span>
-                    <span class="price-unit">/kWh</span>
-                </div>
-                <div class="circle-updated" id="circle-updated"></div>
+    <header class="header">
+      <div class="header-left">
+        <div class="brand">
+          <span class="brand-icon">⚡</span>
+          <span class="brand-title">Home Energy</span>
+        </div>
+        <div class="pill" id="mode-pill">
+          <span class="pill-dot" id="mode-dot"></span>
+          <span class="pill-text" id="mode-text">Live</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="clock" id="clock">--:--</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="orb-section">
+        <div class="orb-meta">
+          <span class="orb-label" id="orb-label">CURRENT RATE</span>
+          <span class="orb-interval" id="orb-interval">--:-- to --:--</span>
+        </div>
+
+        <div class="orb-wrap">
+          <div class="orb-glow" id="orb-glow"></div>
+          <div class="orb-ring" id="orb-ring"></div>
+
+          <div class="orb" id="orb">
+            <div class="orb-spike" id="orb-spike" hidden>PRICE SPIKE</div>
+
+            <div class="orb-price">
+              <span class="orb-price-num" id="price-value">--</span>
+              <span class="orb-price-unit">¢</span>
             </div>
+            <div class="orb-subunit">per kWh</div>
+
+            <div class="orb-level" id="orb-level">optimal</div>
+          </div>
         </div>
-    </div>
 
-    <!-- Bottom totals section -->
-    <div class="totals-section" id="totals-section">
-        <div class="totals-line">
-            <span class="totals-label">Month to date:</span>
-            <span class="totals-value" id="month-total">$--</span>
-            <span class="delayed-badge" id="delayed-badge" style="display: none;">Delayed</span>
+        <div class="orb-updated" id="price-updated">Updated -- ago</div>
+      </section>
+
+      <aside class="cards">
+        <div class="card" id="renewables-card">
+          <div class="card-title-row">
+            <span class="card-title">GRID RENEWABLES</span>
+            <span class="card-icon">🍃</span>
+          </div>
+          <div class="card-metric">
+            <span class="metric-num" id="renewables-value">--</span><span class="metric-unit">%</span>
+          </div>
+          <div class="progress">
+            <div class="progress-bar" id="renewables-bar"></div>
+          </div>
         </div>
-        <div class="totals-asof" id="totals-asof">As of --</div>
-    </div>
 
-    <!-- Empty state -->
-    <div class="empty-state" id="empty-state" style="display: none;">
-        <div class="empty-message">No data yet</div>
-    </div>
+        <div class="card">
+          <div class="card-title-row">
+            <span class="card-title">MONTH TO DATE</span>
+            <span class="badge-delayed" id="totals-delayed" hidden>DELAYED</span>
+          </div>
+          <div class="card-metric">
+            <span class="metric-currency">$</span><span class="metric-num" id="mtd-value">—</span>
+          </div>
+          <div class="card-sub" id="mtd-asof">Waiting for data</div>
+        </div>
 
-    <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+        <div class="card">
+          <div class="card-title-row">
+            <span class="card-title">FORECAST</span>
+            <span class="card-icon">📊</span>
+          </div>
+          <div class="forecast-container" id="forecast-container">
+            <div class="forecast-bars" id="forecast-bars">
+              <!-- Forecast bars will be rendered here -->
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title-row">
+            <span class="card-title">DATA STATUS</span>
+          </div>
+          <div class="status-row">
+            <span>Price Data</span><span id="price-status" class="status-pill">Unknown</span>
+          </div>
+          <div class="status-row">
+            <span>Usage Data</span><span id="usage-status" class="status-pill">Unknown</span>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-message" id="footer-message">Monitoring energy prices</div>
+    </footer>
+  </div>
+
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
 </body>
 </html>
-

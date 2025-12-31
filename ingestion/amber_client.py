@@ -397,6 +397,32 @@ class AmberClient:
         logger.warning(f"No usage data found for today or yesterday")
         return []
 
+    def get_prices_forecast(self, site_id: str, next_intervals: int = 24) -> list[dict]:
+        """
+        Fetch forecast prices for upcoming intervals.
+        
+        Args:
+            site_id: The site ID to fetch prices for
+            next_intervals: Number of future intervals to fetch (default: 24 for 2 hours at 5-min intervals)
+            
+        Returns:
+            List of price interval dictionaries for future intervals
+            
+        Raises:
+            AmberAPIError: If the API request fails
+        """
+        if not site_id:
+            raise ValueError("site_id cannot be empty")
+        
+        logger.info(f"Fetching forecast prices for site {site_id} (next {next_intervals} intervals)...")
+        try:
+            prices = self._request("GET", f"/sites/{site_id}/prices", params={"next": next_intervals, "previous": 0})
+            logger.info(f"Successfully fetched {len(prices)} forecast interval(s)")
+            return prices
+        except Exception as e:
+            logger.error(f"Failed to fetch forecast prices for site {site_id}: {str(e)}")
+            raise
+
     def get_usage(
         self,
         site_id: str,
