@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Energy Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+    <!-- Top status strip -->
+    <div class="status-strip">
+        <div class="badge" id="price-badge">
+            <span class="badge-label">Price:</span>
+            <span class="badge-value" id="price-status">-</span>
+        </div>
+        <div class="badge" id="usage-badge">
+            <span class="badge-label">Usage:</span>
+            <span class="badge-value" id="usage-status">-</span>
+        </div>
+        <div class="badge" id="mode-badge" style="display: none;">
+            <span class="badge-label">Mode:</span>
+            <span class="badge-value" id="mode-status">-</span>
+        </div>
+    </div>
+
+    <!-- Main hero circle -->
+    <div class="hero-container">
+        <div class="hero-circle" id="hero-circle">
+            <div class="circle-content">
+                <div class="circle-title" id="circle-title">LIVE 5 MIN PRICE</div>
+                <div class="circle-time" id="circle-time">Current interval</div>
+                <div class="circle-price">
+                    <span class="price-value" id="price-value">--</span>
+                    <span class="price-unit">/kWh</span>
+                </div>
+                <div class="circle-updated" id="circle-updated"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom totals section -->
+    <div class="totals-section" id="totals-section">
+        <div class="totals-line">
+            <span class="totals-label">Month to date:</span>
+            <span class="totals-value" id="month-total">$--</span>
+            <span class="delayed-badge" id="delayed-badge" style="display: none;">Delayed</span>
+        </div>
+        <div class="totals-asof" id="totals-asof">As of --</div>
+    </div>
+
+    <!-- Empty state -->
+    <div class="empty-state" id="empty-state" style="display: none;">
+        <div class="empty-message">No data yet</div>
+    </div>
+
+    <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>
+

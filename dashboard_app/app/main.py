@@ -1,7 +1,9 @@
 import os
-from datetime import datetime, timezone
-from flask import Flask, jsonify, render_template_string, Response
+from datetime import datetime, timezone, timedelta
+from flask import Flask, jsonify, render_template, Response
 import sys
+import sqlite3
+from zoneinfo import ZoneInfo
 
 # Add parent directory to path to import amber_client
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -486,239 +488,151 @@ def create_app() -> Flask:
             "status": status
         })
 
+    @app.get("/api/totals")
+    def get_totals():
+        """Get month-to-date cost totals from cache."""
+        site_id = os.getenv("AMBER_SITE_ID")
+        channel_type = "general"
+        
+        if not site_id:
+            return jsonify({"error": "AMBER_SITE_ID environment variable is not set"}), 500
+        
+        cache_path = _get_cache_path()
+        
+        # Get current month start in Australia/Sydney timezone
+        sydney_tz = ZoneInfo("Australia/Sydney")
+        now_sydney = datetime.now(sydney_tz)
+        month_start_sydney = now_sydney.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_start_utc = month_start_sydney.astimezone(timezone.utc)
+        month_start_utc_str = month_start_utc.isoformat().replace("+00:00", "Z")
+        
+        # Get current time in UTC for "as of" calculation
+        now_utc = datetime.now(timezone.utc)
+        
+        try:
+            conn = sqlite3.connect(cache_path)
+            cursor = conn.cursor()
+            
+            # Query usage and price joined by interval_start
+            # Only include intervals where both usage and price exist
+            cursor.execute("""
+                SELECT 
+                    u.interval_start,
+                    u.interval_end,
+                    u.kwh,
+                    p.per_kwh
+                FROM usage u
+                INNER JOIN prices p ON 
+                    u.site_id = p.site_id AND
+                    u.interval_start = p.interval_start AND
+                    u.channel_type = p.channel_type
+                WHERE 
+                    u.site_id = ? AND
+                    u.channel_type = ? AND
+                    u.interval_start >= ?
+                ORDER BY u.interval_start ASC
+            """, (site_id, channel_type, month_start_utc_str))
+            
+            rows = cursor.fetchall()
+            
+            # Also get latest usage interval_end for "as of" timestamp
+            cursor.execute("""
+                SELECT interval_end
+                FROM usage
+                WHERE site_id = ? AND channel_type = ? AND interval_start >= ?
+                ORDER BY interval_start DESC
+                LIMIT 1
+            """, (site_id, channel_type, month_start_utc_str))
+            
+            latest_usage_row = cursor.fetchone()
+            as_of_interval_end = latest_usage_row[0] if latest_usage_row else None
+            
+            # Get usage age from latest usage interval
+            usage_age_seconds = None
+            if latest_usage_row:
+                try:
+                    latest_usage_dt = parse_iso_z(latest_usage_row[0])
+                    usage_age_seconds = int((now_utc - latest_usage_dt).total_seconds())
+                except Exception:
+                    pass
+            
+            # Count missing intervals
+            cursor.execute("""
+                SELECT COUNT(DISTINCT u.interval_start)
+                FROM usage u
+                LEFT JOIN prices p ON 
+                    u.site_id = p.site_id AND
+                    u.interval_start = p.interval_start AND
+                    u.channel_type = p.channel_type
+                WHERE 
+                    u.site_id = ? AND
+                    u.channel_type = ? AND
+                    u.interval_start >= ? AND
+                    p.interval_start IS NULL
+            """, (site_id, channel_type, month_start_utc_str))
+            
+            missing_price_count = cursor.fetchone()[0] or 0
+            
+            cursor.execute("""
+                SELECT COUNT(DISTINCT p.interval_start)
+                FROM prices p
+                LEFT JOIN usage u ON 
+                    p.site_id = u.site_id AND
+                    p.interval_start = u.interval_start AND
+                    p.channel_type = u.channel_type
+                WHERE 
+                    p.site_id = ? AND
+                    p.channel_type = ? AND
+                    p.interval_start >= ? AND
+                    u.interval_start IS NULL
+            """, (site_id, channel_type, month_start_utc_str))
+            
+            missing_usage_count = cursor.fetchone()[0] or 0
+            
+            conn.close()
+            
+            # Calculate totals
+            if not rows:
+                return jsonify({
+                    "month_to_date_cost_aud": None,
+                    "as_of_interval_end": None,
+                    "intervals_count": 0,
+                    "missing_price_intervals": missing_price_count,
+                    "missing_usage_intervals": missing_usage_count,
+                    "usage_age_seconds": usage_age_seconds,
+                    "is_delayed": usage_age_seconds is not None and usage_age_seconds > 1800,
+                    "message": "Waiting for usage data"
+                })
+            
+            total_cost_aud = 0.0
+            for row in rows:
+                interval_start, interval_end, kwh, per_kwh = row
+                if kwh is not None and per_kwh is not None:
+                    cost_aud = kwh * (per_kwh / 100.0)
+                    total_cost_aud += cost_aud
+            
+            # Determine if delayed (usage is lagging or very stale)
+            is_delayed = False
+            if usage_age_seconds is not None:
+                is_delayed = usage_age_seconds > 1800  # > 30 minutes
+            
+            return jsonify({
+                "month_to_date_cost_aud": round(total_cost_aud, 2),
+                "as_of_interval_end": as_of_interval_end,
+                "intervals_count": len(rows),
+                "missing_price_intervals": missing_price_count,
+                "missing_usage_intervals": missing_usage_count,
+                "usage_age_seconds": usage_age_seconds,
+                "is_delayed": is_delayed
+            })
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to calculate totals: {str(e)}"}), 500
+
     @app.get("/")
     def index():
-        """Home page with current price display."""
-        html = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Home Energy Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #1a1a1a;
-            color: #ffffff;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .container {
-            text-align: center;
-            max-width: 600px;
-            width: 100%;
-        }
-        .price-display {
-            margin-bottom: 30px;
-        }
-        .price-value {
-            font-size: 72px;
-            font-weight: 700;
-            color: #4ade80;
-            margin: 20px 0;
-            line-height: 1;
-        }
-        .price-label {
-            font-size: 18px;
-            color: #9ca3af;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .info {
-            font-size: 14px;
-            color: #6b7280;
-            margin-top: 20px;
-        }
-        .error {
-            color: #ef4444;
-            font-size: 18px;
-            padding: 20px;
-            background: #7f1d1d;
-            border-radius: 8px;
-            margin-top: 20px;
-        }
-        .loading {
-            color: #9ca3af;
-            font-size: 18px;
-        }
-        .interval-time {
-            font-size: 16px;
-            color: #d1d5db;
-            margin-top: 10px;
-        }
-        .renewables {
-            font-size: 14px;
-            color: #60a5fa;
-            margin-top: 5px;
-        }
-        .cost-display {
-            margin-top: 40px;
-            padding-top: 40px;
-            border-top: 1px solid #374151;
-        }
-        .cost-value {
-            font-size: 48px;
-            font-weight: 700;
-            color: #fbbf24;
-            margin: 20px 0;
-            line-height: 1;
-        }
-        .cost-label {
-            font-size: 16px;
-            color: #9ca3af;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .cost-note {
-            font-size: 12px;
-            color: #6b7280;
-            margin-top: 10px;
-            font-style: italic;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="price-display">
-            <div class="price-label">Current Price</div>
-            <div id="price-value" class="price-value">--</div>
-            <div id="interval-time" class="interval-time"></div>
-            <div id="renewables" class="renewables"></div>
-        </div>
-        
-        <div class="cost-display">
-            <div class="cost-label">Estimated Cost per Hour</div>
-            <div id="cost-value" class="cost-value">--</div>
-            <div id="cost-note" class="cost-note">Based on last interval</div>
-            <div id="cost-error" class="error" style="display: none;"></div>
-        </div>
-        
-        <div id="error" class="error" style="display: none;"></div>
-        <div id="loading" class="loading" style="display: none;">Loading...</div>
-        <div id="last-updated" class="info"></div>
-    </div>
-
-    <script>
-        function updatePrice() {
-            const priceValue = document.getElementById('price-value');
-            const intervalTime = document.getElementById('interval-time');
-            const renewables = document.getElementById('renewables');
-            const error = document.getElementById('error');
-            const loading = document.getElementById('loading');
-            const lastUpdated = document.getElementById('last-updated');
-            
-            // Show loading, hide error
-            loading.style.display = 'block';
-            error.style.display = 'none';
-            
-            fetch('/api/price')
-                .then(response => {
-                    if (!response.ok) {
-                        return response.json().then(data => {
-                            throw new Error(data.error || 'Failed to fetch price');
-                        });
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // Update price
-                    priceValue.textContent = data.per_kwh !== null && data.per_kwh !== undefined 
-                        ? data.per_kwh.toFixed(1) 
-                        : '--';
-                    priceValue.textContent += ' c/kWh';
-                    
-                    // Update interval time
-                    if (data.interval_start && data.interval_end) {
-                        const start = new Date(data.interval_start);
-                        const end = new Date(data.interval_end);
-                        const startStr = start.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
-                        const endStr = end.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
-                        intervalTime.textContent = `${startStr} - ${endStr}`;
-                    } else {
-                        intervalTime.textContent = '';
-                    }
-                    
-                    // Update renewables
-                    if (data.renewables !== null && data.renewables !== undefined) {
-                        renewables.textContent = `Renewables: ${data.renewables.toFixed(1)}%`;
-                    } else {
-                        renewables.textContent = '';
-                    }
-                    
-                    // Update last updated
-                    if (data.fetched_at) {
-                        const fetched = new Date(data.fetched_at);
-                        lastUpdated.textContent = `Last updated: ${fetched.toLocaleTimeString('en-AU')}`;
-                    }
-                    
-                    loading.style.display = 'none';
-                })
-                .catch(err => {
-                    priceValue.textContent = '--';
-                    intervalTime.textContent = '';
-                    renewables.textContent = '';
-                    error.textContent = `Error: ${err.message}`;
-                    error.style.display = 'block';
-                    loading.style.display = 'none';
-                    
-                    const now = new Date();
-                    lastUpdated.textContent = `Last updated: ${now.toLocaleTimeString('en-AU')} (error)`;
-                });
-        }
-        
-        function updateCost() {
-            const costValue = document.getElementById('cost-value');
-            const costError = document.getElementById('cost-error');
-            
-            fetch('/api/cost')
-                .then(response => {
-                    if (!response.ok) {
-                        return response.json().then(data => {
-                            throw new Error(data.error || 'Failed to fetch cost');
-                        });
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // Update cost
-                    if (data.cost_per_hour !== null && data.cost_per_hour !== undefined) {
-                        costValue.textContent = data.cost_per_hour.toFixed(2) + ' c/hr';
-                    } else {
-                        costValue.textContent = '--';
-                    }
-                    costError.style.display = 'none';
-                })
-                .catch(err => {
-                    costValue.textContent = '--';
-                    costError.textContent = `Usage data unavailable: ${err.message}`;
-                    costError.style.display = 'block';
-                });
-        }
-        
-        function updateAll() {
-            updatePrice();
-            updateCost();
-        }
-        
-        // Update immediately on load
-        updateAll();
-        
-        // Update every 30 seconds
-        setInterval(updateAll, 30000);
-    </script>
-</body>
-</html>
-        """
-        return render_template_string(html)
+        """Home page with kiosk-style dashboard."""
+        return render_template("dashboard.html")
 
     return app
 
