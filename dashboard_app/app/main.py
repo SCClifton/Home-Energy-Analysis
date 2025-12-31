@@ -440,7 +440,7 @@ def create_app() -> Flask:
         duration_hours = duration_minutes / 60.0
         usage_kw = kwh / duration_hours if duration_hours > 0 else 0
         cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
-                
+        
         # Calculate usage age
         usage_interval_start_dt = parse_iso_z(cached_usage["interval_start"])
         usage_age_seconds = int((now_utc - usage_interval_start_dt).total_seconds())
@@ -721,6 +721,7 @@ def create_app() -> Flask:
     return app
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5050))
+    port = int(os.getenv("PORT", "5050"))
+    debug = os.getenv("DEBUG", "0") == "1"
     app = create_app()
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=debug)
