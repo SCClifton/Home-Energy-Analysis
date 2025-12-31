@@ -7,7 +7,7 @@ Fetches current price and latest usage data and updates the cache.
 import os
 import sys
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta, date
 
 # Add project root to path to import amber_client
 project_root = Path(__file__).parent.parent
@@ -80,6 +80,9 @@ def main():
     # Get retention days (default 14)
     retention_days = int(os.getenv("RETENTION_DAYS", "14"))
     
+    # Get price lookback days (default 2) for matching delayed usage intervals
+    price_lookback_days = int(os.getenv("PRICE_LOOKBACK_DAYS", "2"))
+    
     channel_type = "general"
     
     try:
@@ -94,6 +97,10 @@ def main():
         if prices and len(prices) > 0:
             # Transform price data to cache row format
             for price in prices:
+                # Filter to general channel type (if channelType field exists)
+                if price.get("channelType") and price.get("channelType") != channel_type:
+                    continue
+                
                 # Normalize timestamps before caching
                 interval_start_raw = price.get("startTime")
                 interval_end_raw = price.get("endTime")
@@ -112,10 +119,48 @@ def main():
                 price_rows.append(price_row)
             
             # Get latest price timestamp (first one is most recent, normalized)
-            latest_price_ts = normalize_interval_timestamp(prices[0].get("startTime"))
+            if price_rows:
+                latest_price_ts = price_rows[0]["interval_start"]
         
-        # Fetch latest usage (same as dashboard uses)
-        usage_data = client.get_usage_recent(site_id, intervals=1)
+        # Fetch rolling price history to cover delayed usage intervals
+        # This ensures prices exist for usage data from yesterday/earlier
+        now_utc = datetime.now(timezone.utc)
+        end_date = now_utc.date()
+        start_date = end_date - timedelta(days=price_lookback_days)
+        
+        print(f"Fetching price history from {start_date.isoformat()} to {end_date.isoformat()}...", file=sys.stderr)
+        historical_prices = client.get_prices_range(site_id, start_date, end_date)
+        
+        if historical_prices and len(historical_prices) > 0:
+            for price in historical_prices:
+                # Filter to general channel type (if channelType field exists)
+                if price.get("channelType") and price.get("channelType") != channel_type:
+                    continue
+                
+                # Normalize timestamps before caching
+                interval_start_raw = price.get("startTime")
+                interval_end_raw = price.get("endTime")
+                interval_start = normalize_interval_timestamp(interval_start_raw)
+                interval_end = normalize_interval_timestamp(interval_end_raw)
+                
+                price_row = {
+                    "site_id": site_id,
+                    "interval_start": interval_start,
+                    "interval_end": interval_end,
+                    "channel_type": channel_type,
+                    "per_kwh": price.get("perKwh"),
+                    "renewables": price.get("renewables"),
+                    "descriptor": price.get("descriptor")
+                }
+                price_rows.append(price_row)
+            
+            print(f"Fetched {len(historical_prices)} historical price intervals", file=sys.stderr)
+        
+        # Fetch usage range for last 2 days (instead of just 1 interval)
+        # This provides more usage data for month-to-date totals
+        usage_start_date = end_date - timedelta(days=2)
+        print(f"Fetching usage from {usage_start_date.isoformat()} to {end_date.isoformat()}...", file=sys.stderr)
+        usage_data = client.get_usage_range(site_id, usage_start_date, end_date)
         
         usage_rows = []
         latest_usage_ts = None
@@ -123,6 +168,10 @@ def main():
         if usage_data and len(usage_data) > 0:
             # Transform usage data to cache row format
             for usage in usage_data:
+                # Filter to general channel type (if channelType field exists)
+                if usage.get("channelType") and usage.get("channelType") != channel_type:
+                    continue
+                
                 # Normalize timestamps before caching
                 interval_start_raw = usage.get("startTime")
                 interval_end_raw = usage.get("endTime")
@@ -139,9 +188,14 @@ def main():
                 usage_rows.append(usage_row)
             
             # Get latest usage timestamp (normalized)
-            latest_usage_ts = normalize_interval_timestamp(usage_data[0].get("startTime"))
+            # Sort by interval_start descending to get most recent
+            usage_rows.sort(key=lambda x: x["interval_start"], reverse=True)
+            if usage_rows:
+                latest_usage_ts = usage_rows[0]["interval_start"]
+            
+            print(f"Fetched {len(usage_rows)} usage intervals", file=sys.stderr)
         
-        # Upsert prices
+        # Upsert prices (includes both current and historical)
         if price_rows:
             sqlite_cache.upsert_prices(cache_path, price_rows)
         
