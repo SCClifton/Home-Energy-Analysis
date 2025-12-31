@@ -1,5 +1,60 @@
 # Project Progress
 
+## 2025-12-31 (Cache-first logic, timestamp normalisation, and data correctness)
+
+### What changed
+- Implemented **end-to-end timestamp normalisation** for Amber data across ingestion, storage, and API layers:
+  - All `interval_start` and `interval_end` values are now normalised to exact 5-minute boundaries (`…:00Z`).
+  - Fixed legacy Amber `+1 second` offsets (`…:01Z`) without requiring database migration.
+- Added **defensive normalisation on cache reads** so legacy cached rows cannot leak incorrect timestamps to API responses or the UI.
+- Updated SQLite cache read logic to support **legacy `:01Z` rows**:
+  - Exact `:00Z` matches are preferred.
+  - Fallback to `+1 second` legacy rows when required.
+- Reworked `/api/price` and `/api/cost` to be **cache-first and deterministic**:
+  - Flow: exact interval → latest cached (stale) → live Amber (only if cache empty and env vars present).
+  - Prevents unnecessary live API calls and avoids errors when Amber credentials are unavailable (eg local dev).
+- Improved `/api/health` semantics:
+  - Added separate `price_age_seconds` and `usage_age_seconds`.
+  - Reintroduced `data_age_seconds` for backward compatibility.
+  - Status is now:
+    - `ok` only when both price and usage are fresh,
+    - `stale` when either is stale,
+    - `unknown` when cache is empty.
+- Added unit test coverage for legacy timestamp fallback behaviour to ensure deterministic cache reads.
+
+### Why this was done
+- Amber API occasionally returns timestamps with a `+1s` offset, causing interval mismatches.
+- Cached data was being skipped due to strict timestamp equality, forcing unnecessary live API calls.
+- Local development without Amber credentials was failing even when cached data existed.
+- `/api/health` was previously reporting misleading “ok” states when usage data was many hours stale.
+
+### What was tested
+- Unit tests updated and passing, including new coverage for legacy timestamp handling.
+- Local Flask app runs correctly using cached data only (no Amber credentials required).
+- Cache-first behaviour verified for `/api/price`, `/api/cost`, and `/api/health`.
+- Deterministic fallback order confirmed (exact → latest cached → live if available).
+
+### Outcome
+- Dashboard now behaves as a **true offline-first appliance**:
+  - Always serves cached data when available.
+  - Clearly marks stale and estimated values.
+  - Only attempts live Amber calls when genuinely required.
+- Timestamp handling is consistent across ingestion, storage, API responses, and UI.
+- Local development workflow is robust without secrets.
+- Raspberry Pi deployment remains unchanged and benefits immediately from improved correctness.
+
+### Files touched
+- `dashboard_app/app/main.py`
+- `src/home_energy_analysis/storage/sqlite_cache.py`
+- `scripts/sync_cache.py`
+- `tests/test_sqlite_cache.py`
+
+### Next steps
+- Surface `is_stale` / `is_estimated` flags visually in the dashboard UI.
+- Minor UI tuning for 5" screen (font size, spacing, status indicators).
+- Decide whether to pursue near-real-time usage via local metering to reduce Amber usage lag.
+
+
 ## 2025-12-29 (Raspberry Pi deployment + operations)
 
 ### What changed
