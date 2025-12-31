@@ -237,12 +237,12 @@ def create_app() -> Flask:
         if not site_id:
             return jsonify({"error": "AMBER_SITE_ID environment variable is not set"}), 500
         
-        # Parse hours parameter (default 2, clamp 1-6)
+        # Parse hours parameter (default 3, clamp 1-6)
         try:
-            hours = int(request.args.get("hours", 2))
+            hours = int(request.args.get("hours", 3))
             hours = max(1, min(6, hours))
         except (ValueError, TypeError):
-            hours = 2
+            hours = 3
         
         # Calculate number of intervals needed (assuming 5-minute intervals)
         # For 30-minute intervals, this would be hours * 2, but we'll use 5-min as default
@@ -440,7 +440,7 @@ def create_app() -> Flask:
         duration_hours = duration_minutes / 60.0
         usage_kw = kwh / duration_hours if duration_hours > 0 else 0
         cost_per_hour = usage_kw * price_per_kwh if price_per_kwh else None
-        
+                
         # Calculate usage age
         usage_interval_start_dt = parse_iso_z(cached_usage["interval_start"])
         usage_age_seconds = int((now_utc - usage_interval_start_dt).total_seconds())

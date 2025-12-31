@@ -54,20 +54,23 @@
       </section>
 
       <aside class="cards">
-        <div class="card" id="renewables-card">
+        <!-- 1) Forecast -->
+        <div class="card forecast-card">
           <div class="card-title-row">
-            <span class="card-title">GRID RENEWABLES</span>
-            <span class="card-icon">🍃</span>
+            <span class="card-title">NEXT 3 HOURS</span>
+            <span class="card-icon">📈</span>
           </div>
-          <div class="card-metric">
-            <span class="metric-num" id="renewables-value">--</span><span class="metric-unit">%</span>
-          </div>
-          <div class="progress">
-            <div class="progress-bar" id="renewables-bar"></div>
+          <div class="forecast">
+            <div class="forecast-timeline"></div>
+            <div class="forecast-bars" id="forecast-bars">
+              <!-- JS renders forecast points here -->
+            </div>
+            <div class="forecast-insight" id="forecast-insight" hidden></div>
           </div>
         </div>
 
-        <div class="card">
+        <!-- 2) Month to date -->
+        <div class="card mtd-card">
           <div class="card-title-row">
             <span class="card-title">MONTH TO DATE</span>
             <span class="badge-delayed" id="totals-delayed" hidden>DELAYED</span>
@@ -78,27 +81,31 @@
           <div class="card-sub" id="mtd-asof">Waiting for data</div>
         </div>
 
-        <div class="card">
-          <div class="card-title-row">
-            <span class="card-title">FORECAST</span>
-            <span class="card-icon">📊</span>
-          </div>
-          <div class="forecast-container" id="forecast-container">
-            <div class="forecast-bars" id="forecast-bars">
-              <!-- Forecast bars will be rendered here -->
+        <!-- 3) Bottom row: renewables + data status -->
+        <div class="card-row">
+          <div class="card renewables-card">
+            <div class="card-title-row">
+              <span class="card-title">RENEWABLES</span>
+              <span class="card-icon">🍃</span>
+            </div>
+            <div class="renewables-compact">
+              <span class="metric-num" id="renewables-value">--</span><span class="metric-unit">%</span>
+              <div class="progress">
+                <div class="progress-bar" id="renewables-bar"></div>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="card">
-          <div class="card-title-row">
-            <span class="card-title">DATA STATUS</span>
-          </div>
-          <div class="status-row">
-            <span>Price Data</span><span id="price-status" class="status-pill">Unknown</span>
-          </div>
-          <div class="status-row">
-            <span>Usage Data</span><span id="usage-status" class="status-pill">Unknown</span>
+          <div class="card data-status-card">
+            <div class="card-title-row">
+              <span class="card-title">DATA STATUS</span>
+            </div>
+            <div class="status-row">
+              <span>Price</span><span id="price-status" class="status-pill">Unknown</span>
+            </div>
+            <div class="status-row">
+              <span>Usage</span><span id="usage-status" class="status-pill">Unknown</span>
+            </div>
           </div>
         </div>
       </aside>

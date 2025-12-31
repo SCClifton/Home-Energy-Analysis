@@ -39,47 +39,46 @@ function getPriceLevel(priceCents) {
     }
 }
 
-// Format time range (Sydney timezone)
+// Format time in 12-hour format with uppercase AM/PM
+function fmtTime12h(date) {
+    return new Intl.DateTimeFormat('en-AU', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Australia/Sydney'
+    }).format(date).replace('am', 'AM').replace('pm', 'PM');
+}
+
+// Format day and time in 12-hour format
+function fmtDayTime12h(date) {
+    const day = new Intl.DateTimeFormat('en-AU', { 
+        weekday: 'short',
+        timeZone: 'Australia/Sydney'
+    }).format(date);
+    return `${day} ${fmtTime12h(date)}`;
+}
+
+// Format time range (Sydney timezone) - 12-hour format
 function formatTimeRange(startStr, endStr) {
     if (!startStr || !endStr) return "--:-- to --:--";
     try {
         const start = new Date(startStr);
         const end = new Date(endStr);
         
-        const startTime = start.toLocaleTimeString('en-AU', { 
-            hour: '2-digit', 
-            minute: '2-digit', 
-            hour12: false,
-            timeZone: 'Australia/Sydney'
-        });
-        const endTime = end.toLocaleTimeString('en-AU', { 
-            hour: '2-digit', 
-            minute: '2-digit', 
-            hour12: false,
-            timeZone: 'Australia/Sydney'
-        });
+        const startTime = fmtTime12h(start);
+        const endTime = fmtTime12h(end);
         return `${startTime} to ${endTime}`;
     } catch (e) {
         return "--:-- to --:--";
     }
 }
 
-// Format "as of" timestamp (Sydney timezone)
+// Format "as of" timestamp (Sydney timezone) - 12-hour format
 function formatAsOf(timestampStr) {
     if (!timestampStr) return "Waiting for data";
     try {
         const dt = new Date(timestampStr);
-        const dateStr = dt.toLocaleDateString('en-AU', { 
-            weekday: 'short',
-            timeZone: 'Australia/Sydney'
-        });
-        const timeStr = dt.toLocaleTimeString('en-AU', { 
-            hour: 'numeric', 
-            minute: '2-digit', 
-            hour12: true,
-            timeZone: 'Australia/Sydney'
-        });
-        return `As of ${dateStr} ${timeStr}`;
+        return `As of ${fmtDayTime12h(dt)}`;
     } catch (e) {
         return "Waiting for data";
     }
@@ -114,7 +113,7 @@ function updateClock() {
     const clockEl = document.getElementById('clock');
     if (clockEl) {
         const now = new Date();
-        const timeStr = now.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true });
+        const timeStr = fmtTime12h(now);
         clockEl.textContent = timeStr;
     }
 }
@@ -130,49 +129,200 @@ function getFooterMessage(priceLevel, intervalLabel) {
     }
 }
 
+// Forecast constants
+const FORECAST_HOURS = 3;
+const OFFSETS_MIN = [0, 30, 60, 90, 120, 150, 180];
+
+// Downsample forecast intervals to 7 points at 30-min increments
+function downsampleForecast(intervals) {
+    if (!intervals || intervals.length === 0) {
+        return null;
+    }
+    
+    const now = new Date();
+    const points = [];
+    
+    // Parse intervals with start/end times
+    const parsedIntervals = intervals.map(interval => {
+        try {
+            const start = new Date(interval.start);
+            const end = new Date(interval.end);
+            return {
+                start,
+                end,
+                per_kwh: interval.per_kwh || 0,
+                spikeStatus: interval.spikeStatus,
+                descriptor: interval.descriptor,
+                price_max: interval.price_max || interval.per_kwh || 0
+            };
+        } catch (e) {
+            return null;
+        }
+    }).filter(i => i !== null);
+    
+    if (parsedIntervals.length === 0) {
+        return null;
+    }
+    
+    // For each offset, find the matching interval
+    for (const offsetMin of OFFSETS_MIN) {
+        const target = new Date(now.getTime() + offsetMin * 60000);
+        
+        // Find interval where start <= target < end
+        let matched = parsedIntervals.find(interval => 
+            interval.start <= target && target < interval.end
+        );
+        
+        // If no exact match, find closest future interval
+        if (!matched) {
+            const futureIntervals = parsedIntervals.filter(i => i.start > target);
+            if (futureIntervals.length > 0) {
+                matched = futureIntervals.reduce((closest, current) => 
+                    current.start < closest.start ? current : closest
+                );
+            }
+        }
+        
+        if (matched) {
+            points.push({
+                minutes_from_now: offsetMin,
+                per_kwh: matched.per_kwh,
+                price_max: matched.price_max,
+                is_spike: matched.spikeStatus === 'spike' || matched.per_kwh >= 300,
+                descriptor: matched.descriptor
+            });
+        } else {
+            points.push(null);
+        }
+    }
+    
+    return points;
+}
+
+// Generate forecast insight message
+function generateForecastInsight(points) {
+    if (!points || points.length === 0) {
+        return null;
+    }
+    
+    // Filter out null points
+    const validPoints = points.filter(p => p !== null);
+    if (validPoints.length < 2) {
+        return null;
+    }
+    
+    const firstPrice = validPoints[0].per_kwh;
+    const lastPrice = validPoints[validPoints.length - 1].per_kwh;
+    
+    // Rule 1: Check for spikes after "Now"
+    for (let i = 1; i < points.length; i++) {
+        const point = points[i];
+        if (point && point.is_spike) {
+            const spikeOffset = OFFSETS_MIN[i];
+            return {
+                message: `Spike expected in ~${spikeOffset}m, consider running appliances before then`,
+                style: 'spike'
+            };
+        }
+    }
+    
+    // Rule 2: Prices rising (last > first * 1.3)
+    if (lastPrice > firstPrice * 1.3) {
+        return {
+            message: 'Prices rising, consider using appliances now',
+            style: 'rising'
+        };
+    }
+    
+    // Rule 3: Prices dropping (last < first * 0.7)
+    if (lastPrice < firstPrice * 0.7) {
+        return {
+            message: 'Prices dropping, wait for better rates',
+            style: 'dropping'
+        };
+    }
+    
+    // No insight
+    return null;
+}
+
 // Render forecast bars
 function renderForecast(intervals) {
     const container = document.getElementById('forecast-bars');
+    const insightEl = document.getElementById('forecast-insight');
+    
     if (!container) return;
     
-    if (!intervals || intervals.length === 0) {
+    // Downsample to 7 points
+    const points = downsampleForecast(intervals);
+    
+    if (!points || points.every(p => p === null)) {
         container.innerHTML = '<div class="forecast-empty">No forecast data available</div>';
+        if (insightEl) {
+            insightEl.hidden = true;
+        }
         return;
     }
     
-    // Find max price for scaling
-    const maxPrice = Math.max(...intervals.map(i => i.per_kwh || 0), 1);
+    // Find max price for scaling (use price_max if available, else per_kwh)
+    const maxPrice = Math.max(
+        ...points.filter(p => p !== null).map(p => p.price_max || p.per_kwh || 0),
+        1
+    );
     
-    container.innerHTML = intervals.map(interval => {
-        const price = interval.per_kwh || 0;
-        const heightPercent = Math.min((price / maxPrice) * 100, 100);
-        const isSpike = interval.spikeStatus === 'spike' || price >= 300;
-        const priceLevel = getPriceLevel(price);
-        
-        // Format time (just hour:minute)
-        let timeLabel = '--:--';
-        try {
-            const start = new Date(interval.start);
-            timeLabel = start.toLocaleTimeString('en-AU', {
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false,
-                timeZone: 'Australia/Sydney'
-            });
-        } catch (e) {
-            // Keep default
+    // Render points
+    container.innerHTML = points.map((point, index) => {
+        if (point === null) {
+            return `
+                <div class="forecast-point">
+                    <div class="forecast-price">--</div>
+                    <div class="forecast-bar-wrap">
+                        <div class="forecast-bar" style="height: 0;"></div>
+                    </div>
+                    <div class="forecast-label">${index === 0 ? 'Now' : `+${OFFSETS_MIN[index]}m`}</div>
+                </div>
+            `;
         }
         
+        const price = point.per_kwh || 0;
+        const priceMax = point.price_max || price;
+        const barHeight = Math.max((price / maxPrice) * 40, 4); // Min 4px height
+        const rangeHeight = priceMax > price ? Math.max((priceMax / maxPrice) * 40, 4) : 0;
+        const isSpike = point.is_spike;
+        const priceLevel = getPriceLevel(price);
+        
+        // Format price label (0 dp if >= 100, else 1 dp)
+        const priceLabel = price >= 100 ? price.toFixed(0) : price.toFixed(1);
+        
+        // Label: "Now" for first point, "+30m" etc for others
+        const label = index === 0 ? 'Now' : `+${OFFSETS_MIN[index]}m`;
+        
         return `
-            <div class="forecast-bar-wrapper" title="${timeLabel} - ${price.toFixed(1)}¢/kWh">
-                <div class="forecast-bar ${isSpike ? 'spike' : ''}" 
-                     style="height: ${heightPercent}%; background-color: ${priceLevel.orbBg};"
-                     data-price="${price.toFixed(1)}">
+            <div class="forecast-point">
+                <div class="forecast-price">${priceLabel}¢</div>
+                <div class="forecast-bar-wrap">
+                    ${rangeHeight > barHeight ? `<div class="forecast-range" style="height: ${rangeHeight}px; background-color: ${priceLevel.orbBg};"></div>` : ''}
+                    <div class="forecast-bar ${isSpike ? 'spike' : ''}" 
+                         style="height: ${barHeight}px; background-color: ${priceLevel.orbBg};">
+                    </div>
+                    ${index === 0 ? '<div class="forecast-now"></div>' : ''}
                 </div>
-                <div class="forecast-label">${timeLabel}</div>
+                <div class="forecast-label">${label}</div>
             </div>
         `;
     }).join('');
+    
+    // Update insight
+    const insight = generateForecastInsight(points);
+    if (insightEl) {
+        if (insight) {
+            insightEl.textContent = insight.message;
+            insightEl.className = `forecast-insight ${insight.style}`;
+            insightEl.hidden = false;
+        } else {
+            insightEl.hidden = true;
+        }
+    }
 }
 
 // Update UI from API data
@@ -185,7 +335,7 @@ function updateUI() {
         }).catch(() => ({ data: null, dataSource: null })),
         fetch('/api/health').then(r => r.ok ? r.json() : null).catch(() => null),
         fetch('/api/totals').then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch('/api/forecast').then(r => r.ok ? r.json() : null).catch(() => null)
+        fetch('/api/forecast?hours=3').then(r => r.ok ? r.json() : null).catch(() => null)
     ]).then(([priceResponse, healthData, totalsData, forecastData]) => {
         const priceData = priceResponse.data;
         const priceDataSource = priceResponse.dataSource;
