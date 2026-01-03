@@ -1,5 +1,49 @@
 # Project Progress
 
+## 2026-01-03 (Supabase storage + historical prices backfill)
+
+### What changed
+
+* Set up Supabase Postgres as a durable store for historical data (Pi stays SQLite-first for appliance reliability).
+* Added Supabase schema and client:
+
+  * New schema: `ingest_events`, `price_intervals`, `usage_intervals`.
+  * New storage module: `src/home_energy_analysis/storage/supabase_db.py` using psycopg (pooler session mode) with connection retry + keepalive settings to stabilise connections.
+* Added scripts:
+
+  * `scripts/test_supabase_db.py` (smoke test for SUPABASE_DB_URL)
+  * `scripts/load_parquet_to_supabase.py` (loads prices/usage parquet with idempotent upserts and ingest provenance)
+  * `scripts/backfill_amber_prices_to_supabase.py` (7-day chunk backfill, optional resume)
+  * `scripts/backfill_amber_usage_to_supabase.py` (chunked + adaptive, optional resume)
+* Updated packaging so `supabase_schema.sql` is included as package data (alongside `sqlite_schema.sql`).
+
+### What was tested
+
+* Supabase connectivity confirmed via `scripts/test_supabase_db.py` (stable across repeated runs after adding retries).
+* Loaded sample parquet into Supabase:
+
+  * Prices parquet loaded successfully (1127 rows).
+  * Usage parquet loaded successfully (864 rows) and another parquet with 288 rows (1 day at 5-minute resolution).
+* Ran Amber prices backfill with resume disabled:
+
+  * Verified `price_intervals` now spans 2024-06-15 14:00:01+00 to 2026-01-03 13:30:01+00
+  * Total price rows in Supabase: 143,031
+
+### Issues / limitations found
+
+* Amber usage backfill for older ranges returned 0 rows (likely API history constraints).
+* Amber usage backfill for recent windows hit rate limiting (HTTP 429). Needs 429-aware throttling/backoff (sleep between requests, respect Retry-After if present) before attempting larger runs.
+
+### Next steps
+
+* Add 429 handling and throttling to `backfill_amber_usage_to_supabase.py`.
+* Retry Amber usage backfill for the last ~90 days once throttling is in place.
+* Load Powerpal 2025 usage into Supabase as the main baseline series for modelling.
+* Decide forward sync design: keep Pi SQLite as cache, optionally push deltas to Supabase on a timer.
+
+
+
+
 ## 2025-12-31 (UI overhaul, live-first price + forecast, Pi deployment)
 
 ### What shipped

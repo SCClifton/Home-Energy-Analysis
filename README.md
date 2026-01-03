@@ -75,29 +75,48 @@ Local-only (gitignored):
 - An Amber API token (create in the Amber app)
 
 ### Create and activate a virtual environment
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+```
 
-Configure environment variables
+### Configure environment variables (local dev)
 
-Create config/.env (not committed):
+Create `config/.env` (not committed):
+
+```bash
 AMBER_TOKEN=your_token_here
-AMBER_SITE_ID=optional_site_id_here
+AMBER_SITE_ID=your_site_id_here
 PORT=5050
 
-Load it into your shell:
+# Powerpal (usage backfill)
+POWERPAL_DEVICE_ID=...
+POWERPAL_TOKEN=...
+POWERPAL_SAMPLE=...
+```
+
+Load into your shell:
+
+```bash
 set -a
 source config/.env
 set +a
+```
 
-Run the dashboard
+### Run the dashboard
+
+```bash
 PORT=5050 python dashboard_app/app/main.py
+```
 
 Open:
-	•	http://localhost:5050
+
+* [http://localhost:5050](http://localhost:5050)
+
+**Note:** Do not commit `config/.env` or `.env.local` to git.
 
 ### Sync cache
 Refresh the SQLite cache with latest data from Amber API:
@@ -116,6 +135,124 @@ Test the endpoint:
 ```bash
 curl -s http://127.0.0.1:5050/api/totals | python -m json.tool
 ```
+
+### Supabase (optional)
+
+This project supports storing data in Supabase Postgres alongside the Raspberry Pi SQLite cache. The Pi remains SQLite-first for appliance reliability, Supabase is the durable store for historical analysis.
+
+#### Environment files
+
+* `config/.env` (local dev, not committed): Amber + Powerpal credentials.
+* `.env.local` (repo root, not committed): Supabase Postgres connection string.
+
+Create `.env.local` in the repo root:
+
+```bash
+# Supabase (Mac only)
+SUPABASE_DB_URL=postgresql://USER:PASSWORD@HOST:PORT/postgres
+```
+
+When running scripts, we load env in this order:
+
+1. `config/.env` (Amber/Powerpal)
+2. `.env.local` (Supabase override)
+
+**Note:** Do not commit `config/.env` or `.env.local` to git.
+
+#### Supabase setup
+
+1. Create a Supabase project.
+2. In Supabase, open SQL Editor and run:
+   `src/home_energy_analysis/storage/supabase_schema.sql`
+3. Test the connection:
+
+```bash
+python scripts/test_supabase_db.py
+```
+
+#### Connection notes (pooler vs direct)
+
+* **Recommended (most networks): Pooler (Session mode)**
+  Use the pooler connection string shown in Supabase "Connect". It typically uses:
+
+  * host: `aws-1-ap-southeast-2.pooler.supabase.com`
+  * port: `5432`
+  * user: `postgres.<project-ref>` (example: `postgres.naebksqkrgixatdzgmir`)
+* **Direct connection (IPv6-only)**
+  Supabase direct connections may fail on IPv4-only or IPv6-not-routable networks, even if DNS shows an AAAA record.
+
+#### Load parquet into Supabase
+
+Use your Amber site id from `config/.env` (AMBER_SITE_ID).
+
+Load prices:
+
+```bash
+python scripts/load_parquet_to_supabase.py \
+  --kind prices \
+  --parquet data_processed/prices_2025-12-20_2025-12-23.parquet \
+  --site-id YOUR_AMBER_SITE_ID \
+  --source amber \
+  --is-forecast false
+```
+
+Load usage:
+
+```bash
+python scripts/load_parquet_to_supabase.py \
+  --kind usage \
+  --parquet data_processed/usage_2025-12-20_2025-12-23.parquet \
+  --site-id YOUR_AMBER_SITE_ID \
+  --source amber \
+  --channel-type general
+```
+
+The script handles:
+- Column name normalization (e.g., `per_kwh` → `price_cents_per_kwh`)
+- Timezone conversion to UTC
+- Idempotent upserts (safe to run multiple times)
+- Missing columns (gracefully handles optional fields)
+
+#### Backfill from Amber API into Supabase
+
+Prices backfill (7-day chunks):
+
+```bash
+python scripts/backfill_amber_prices_to_supabase.py \
+  --start 2024-06-16 \
+  --chunk-days 7 \
+  --resume false
+```
+
+Notes:
+
+* Use `--resume false` for historical backfills.
+* Use `--resume true` later for forward sync (continue from latest interval already in Supabase).
+
+Usage backfill (Amber API limitations + rate limits):
+
+* Amber usage history via API may be limited (older windows can return 0 rows).
+* Usage backfill can hit HTTP 429 rate limits. If you see 429s, reduce request rate (smaller windows) and retry later.
+
+Example usage backfill attempt for recent windows:
+
+```bash
+python scripts/backfill_amber_usage_to_supabase.py \
+  --start 2025-10-05 \
+  --chunk-days 7 \
+  --min-chunk-days 1 \
+  --resume false \
+  --channel-type general
+```
+
+#### Troubleshooting
+
+* `FATAL: password authentication failed`
+  Check you used the correct password and the correct username. Pooler requires `postgres.<project-ref>` not plain `postgres`.
+* `SSL connection has been closed unexpectedly` or `Circuit breaker open`
+  Pooler instability or upstream DB not available. Retry, restart the Supabase project, and rely on connection retries (implemented in `supabase_db.get_conn()`).
+* `failed to resolve host ...` (Python) while `dig` works
+  DNS resolver path issue. Prefer pooler hostname and retry.
 
 Raspberry Pi deployment (planned)
 
@@ -195,17 +332,20 @@ To build a longer historical baseline, this project uses:
 **Powerpal usage → 5-minute kWh parquet**
 ```bash
 python scripts/pull_powerpal.py --start YYYY-MM-DD --end YYYY-MM-DD
+```
 
 Output:
-data_processed/powerpal/powerpal_usage_5min_<start>_<end>.parquet
+`data_processed/powerpal/powerpal_usage_5min_<start>_<end>.parquet`
 
-Amber prices → parquet
+**Amber prices → parquet**
+```bash
 python scripts/pull_historical.py --start YYYY-MM-DD --end YYYY-MM-DD --outdir data_processed
+```
 
 Output:
-data_processed/prices_<start>_<end>.parquet
+`data_processed/prices_<start>_<end>.parquet`
 
-Timestamp alignment
+**Timestamp alignment**
 
 Powerpal usage is aligned exactly on 5-minute boundaries (…:00).
 Amber prices often arrive with a +1 second offset (…:01).

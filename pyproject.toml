@@ -19,7 +19,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"home_energy_analysis.storage" = ["sqlite_schema.sql"]
+"home_energy_analysis.storage" = ["sqlite_schema.sql", "supabase_schema.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
