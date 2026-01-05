@@ -1,89 +1,74 @@
-# Home Energy Dashboard and Modelling
+# Home Energy Analysis
 
-This project builds a simple, glanceable home energy dashboard for the kitchen, then extends it into a modelling tool for solar, batteries, and EV charging.
+A home energy dashboard for a Raspberry Pi kitchen display, plus a data pipeline for historical analysis and modelling (solar, battery, EV).
 
-The end goal is a small Raspberry Pi with a touchscreen mounted on the fridge that shows:
-- Current electricity price (c/kWh) from Amber
-- Estimated cost per hour (based on household usage)
-- A simple “cheap / normal / expensive” indicator
+The Pi runs as an offline-first appliance using a local SQLite cache. Supabase Postgres is the durable store for historical analysis and modelling.
 
-Later phases add scenario modelling using historical calendar year 2025 (or the last 12 months) to estimate the value of:
-- Rooftop solar (size options, self-consumption, exports)
-- EV charging (Tesla Model Y, 7 kW home charger), solar vs cheap grid charging
-- Vehicle-to-home behaviour (V2H), and V2G if feasible
-- Home battery (Powerwall and alternatives), including payback, ROI, and IRR
+## What this repo does
 
-## Status
+1. **Dashboard appliance**: A glanceable display showing current electricity price (c/kWh), cost per hour, and a short-term forecast. Designed for a Raspberry Pi with a 5-inch touchscreen mounted in the kitchen.
 
-Current state (local dev):
-- Flask dashboard skeleton is running (basic “Dashboard running” page)
-- Amber ingestion scripts exist and are being refactored into a cleaner client
-- Repo structure has been refactored to separate dashboard, ingestion, analysis, and Raspberry Pi deployment
+2. **Data pipeline**: Scripts to pull prices and usage from Amber Electric, usage history from Powerpal CSV exports, and load everything into Supabase for analysis.
 
-## Current features
+3. **Modelling (planned)**: Scenario engine to estimate the value of rooftop solar, home batteries, EV charging strategies, and vehicle-to-home (V2H).
 
-- Current wholesale price (c/kWh)
-- Estimated cost per hour (based on last interval)
+## Current status (2026-01-05)
 
-## Endpoints
+### Working
 
-- /api/price
-- /api/cost
+- Raspberry Pi boots straight into the dashboard in Chromium kiosk mode.
+- Dashboard runs as a systemd service (`home-energy-dashboard.service`) on port 5050.
+- Cache refresh timer (if enabled on the Pi) refreshes data via `home-energy-sync-cache.timer`.
+- Supabase Postgres is stable via pooler session mode (port 5432).
+- Amber prices backfilled into Supabase from 2024-06-16 to present.
+- Powerpal minute CSV pipeline downloads and loads into Supabase (from 2024-12-30 onward).
 
-Next step:
-- Create a new Amber API token and wire in a proper `amber_client.py`
+### Known limitations
 
-## Architecture (high level)
+- Amber usage history via API is limited (older windows may return 0 rows).
+- Amber usage backfill can hit HTTP 429 rate limits (needs throttling and backoff).
+- Powerpal CSV export tokens are short-lived (manual refresh required).
+- `/api/health` may show `status: stale` when the usage cache is old; this does not prevent the UI from loading.
 
-1. Ingestion pulls interval prices and usage from Amber.
-2. Data is stored locally (start with SQLite and/or parquet for analysis outputs).
-3. Dashboard reads the stored data and renders a simple view for the fridge screen.
-4. Modelling scripts use the same stored data to run solar, EV, and battery scenarios.
+## Architecture
 
-## Data sources
+### Raspberry Pi appliance
 
-Planned and/or in progress:
-- Amber Electric API (prices, usage)
-- Powerpal (optional, likely via exports rather than direct BLE integration)
-- OpenEnergyMonitor (open alternative for real-time local metering)
-- Tessie (Tesla driving and charging history) or Tesla API where feasible
+1. Flask dashboard runs locally on `http://127.0.0.1:5050`.
+2. Dashboard reads from a local SQLite cache for resilience.
+3. A systemd timer (if enabled) refreshes the cache from Amber.
+4. Chromium runs in kiosk mode pointing to the local dashboard.
+
+### Supabase (historical storage)
+
+Supabase stores time-series data for analysis and modelling:
+
+- `ingest_events` (provenance tracking)
+- `price_intervals` (wholesale prices)
+- `usage_intervals` (energy consumption)
 
 ## Repo structure
 
-Key folders:
-- `dashboard_app/`  
-  Flask web app (UI + API endpoints later)
-- `ingestion/`  
-  Amber client and ingestion jobs (scheduled pulls, data validation)
-- `analysis/`  
-  Modelling code, notebooks, and scenario engine (solar, battery, EV, finance)
-- `pi/`  
-  Raspberry Pi setup scripts and systemd service definitions
-- `docs/`  
-  Notes, architecture, and decisions log
+| Folder | Purpose |
+|--------|---------|
+| `dashboard_app/` | Flask web app (UI and API endpoints) |
+| `scripts/` | Ingestion and backfill scripts (Amber, Powerpal, Supabase loaders) |
+| `src/home_energy_analysis/storage/` | Storage layer (SQLite cache schema, Supabase schema and connection code) |
+| `analysis/` | Notebooks and analysis utilities |
+| `docs/` | Operational docs (`pi_deployment.md` is the source of truth for Pi setup) |
+| `pi/` | Pi helper scripts (update script, service files) |
 
 Local-only (gitignored):
+
 - `.venv/` (Python virtual environment)
-- `data/` or `Data/` (raw exports, large files)
+- `data_raw/`, `data_processed/`, `data_local/` (raw exports, processed files, SQLite cache)
 - `logs/`
 
-## Local setup
+## Secrets and environment
 
-### Prerequisites
-- macOS or Linux
-- Python 3.11+ recommended
-- An Amber API token (create in the Amber app)
+Do not commit secrets.
 
-### Create and activate a virtual environment
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### Configure environment variables (local dev)
+### Local dev (Mac)
 
 Create `config/.env` (not committed):
 
@@ -93,12 +78,36 @@ AMBER_SITE_ID=your_site_id_here
 PORT=5050
 
 # Powerpal (usage backfill)
-POWERPAL_DEVICE_ID=...
-POWERPAL_TOKEN=...
-POWERPAL_SAMPLE=...
+POWERPAL_DEVICE_ID=your_device_id
+POWERPAL_TOKEN=your_token
+POWERPAL_SAMPLE=1
 ```
 
-Load into your shell:
+Create `.env.local` in the repo root (not committed):
+
+```bash
+SUPABASE_DB_URL=postgresql://USER:PASSWORD@HOST:PORT/postgres
+```
+
+### Raspberry Pi
+
+Runtime environment is stored at `/etc/home-energy-analysis/dashboard.env` (not committed). Contains `AMBER_TOKEN`, `AMBER_SITE_ID`, `PORT`, `SQLITE_PATH`, `RETENTION_DAYS`, `DEBUG`.
+
+## Local development quickstart (Mac)
+
+### Setup
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+pip install -e .
+```
+
+### Configure environment
+
+Load your secrets:
 
 ```bash
 set -a
@@ -112,110 +121,32 @@ set +a
 PORT=5050 python dashboard_app/app/main.py
 ```
 
-Open:
+Open `http://127.0.0.1:5050/` in your browser.
 
-* [http://localhost:5050](http://localhost:5050)
-
-**Note:** Do not commit `config/.env` or `.env.local` to git.
-
-### Sync cache
-Refresh the SQLite cache with latest data from Amber API:
-
-**Note:** This requires `AMBER_TOKEN` and `AMBER_SITE_ID` to be loaded from `config/.env`.
+### Health check
 
 ```bash
-set -a
-source config/.env
-set +a
-export SQLITE_PATH="$PWD/data_local/cache.sqlite"
-python scripts/sync_cache.py
+curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
 ```
 
-Test the endpoint:
-```bash
-curl -s http://127.0.0.1:5050/api/totals | python -m json.tool
-```
+## Supabase
 
-### Supabase (optional)
-
-This project supports storing data in Supabase Postgres alongside the Raspberry Pi SQLite cache. The Pi remains SQLite-first for appliance reliability, Supabase is the durable store for historical analysis.
-
-#### Environment files
-
-* `config/.env` (local dev, not committed): Amber + Powerpal credentials.
-* `.env.local` (repo root, not committed): Supabase Postgres connection string.
-
-Create `.env.local` in the repo root:
-
-```bash
-# Supabase (Mac only)
-SUPABASE_DB_URL=postgresql://USER:PASSWORD@HOST:PORT/postgres
-```
-
-When running scripts, we load env in this order:
-
-1. `config/.env` (Amber/Powerpal)
-2. `.env.local` (Supabase override)
-
-**Note:** Do not commit `config/.env` or `.env.local` to git.
-
-#### Supabase setup
+### Setup
 
 1. Create a Supabase project.
-2. In Supabase, open SQL Editor and run:
-   `src/home_energy_analysis/storage/supabase_schema.sql`
-3. Test the connection:
+2. Apply schema via SQL Editor: `src/home_energy_analysis/storage/supabase_schema.sql`
+3. Test connectivity:
 
 ```bash
 python scripts/test_supabase_db.py
 ```
 
-#### Connection notes (pooler vs direct)
+### Connection notes
 
-* **Recommended (most networks): Pooler (Session mode)**
-  Use the pooler connection string shown in Supabase "Connect". It typically uses:
+- Use the pooler connection string (session mode, port 5432).
+- Pooler username format is `postgres.<project-ref>`, not plain `postgres`.
 
-  * host: `aws-1-ap-southeast-2.pooler.supabase.com`
-  * port: `5432`
-  * user: `postgres.<project-ref>` (example: `postgres.naebksqkrgixatdzgmir`)
-* **Direct connection (IPv6-only)**
-  Supabase direct connections may fail on IPv4-only or IPv6-not-routable networks, even if DNS shows an AAAA record.
-
-#### Load parquet into Supabase
-
-Use your Amber site id from `config/.env` (AMBER_SITE_ID).
-
-Load prices:
-
-```bash
-python scripts/load_parquet_to_supabase.py \
-  --kind prices \
-  --parquet data_processed/prices_2025-12-20_2025-12-23.parquet \
-  --site-id YOUR_AMBER_SITE_ID \
-  --source amber \
-  --is-forecast false
-```
-
-Load usage:
-
-```bash
-python scripts/load_parquet_to_supabase.py \
-  --kind usage \
-  --parquet data_processed/usage_2025-12-20_2025-12-23.parquet \
-  --site-id YOUR_AMBER_SITE_ID \
-  --source amber \
-  --channel-type general
-```
-
-The script handles:
-- Column name normalization (e.g., `per_kwh` → `price_cents_per_kwh`)
-- Timezone conversion to UTC
-- Idempotent upserts (safe to run multiple times)
-- Missing columns (gracefully handles optional fields)
-
-#### Backfill from Amber API into Supabase
-
-Prices backfill (7-day chunks):
+### Backfill Amber prices
 
 ```bash
 python scripts/backfill_amber_prices_to_supabase.py \
@@ -224,17 +155,11 @@ python scripts/backfill_amber_prices_to_supabase.py \
   --resume false
 ```
 
-Notes:
+Use `--resume true` for forward sync (continue from latest interval in Supabase).
 
-* Use `--resume false` for historical backfills.
-* Use `--resume true` later for forward sync (continue from latest interval already in Supabase).
+### Backfill Amber usage
 
-Usage backfill (Amber API limitations + rate limits):
-
-* Amber usage history via API may be limited (older windows can return 0 rows).
-* Usage backfill can hit HTTP 429 rate limits. If you see 429s, reduce request rate (smaller windows) and retry later.
-
-Example usage backfill attempt for recent windows:
+Note: API limits and rate limiting apply. May need throttling.
 
 ```bash
 python scripts/backfill_amber_usage_to_supabase.py \
@@ -245,146 +170,104 @@ python scripts/backfill_amber_usage_to_supabase.py \
   --channel-type general
 ```
 
-#### Troubleshooting
+## Powerpal minute CSV pipeline
 
-* `FATAL: password authentication failed`
-  Check you used the correct password and the correct username. Pooler requires `postgres.<project-ref>` not plain `postgres`.
-* `SSL connection has been closed unexpectedly` or `Circuit breaker open`
-  Pooler instability or upstream DB not available. Retry, restart the Supabase project, and rely on connection retries (implemented in `supabase_db.get_conn()`).
-* `failed to resolve host ...` (Python) while `dig` works
-  DNS resolver path issue. Prefer pooler hostname and retry.
+### Download exports
 
-Raspberry Pi deployment (planned)
-
-Hardware (typical):
-	•	Raspberry Pi 5 (4GB is fine for a kiosk dashboard)
-	•	5-inch DSI touchscreen
-	•	Reliable 5V USB-C supply (mains power is strongly recommended for always-on display)
-
-Deployment approach:
-	•	Install Raspberry Pi OS
-	•	Install project dependencies
-	•	Run the Flask app as a systemd service
-	•	Launch Chromium in kiosk mode on boot pointing to http://localhost:<port>
-
-All Pi-specific scripts and service files live under pi/.
-
-Roadmap and definition of done
-
-Phase 1: Live price dashboard (Amber only)
-	•	Show current c/kWh and next interval(s)
-	•	Cache and log price history locally
-Definition of done:
-	•	Dashboard shows price and updates reliably
-	•	Ingestion runs unattended for at least 7 days
-
-Phase 2: Cost per hour
-
-Route A (Amber usage):
-	•	Use Amber interval usage if latency is acceptable
-Route B (local metering):
-	•	Use local hardware (OpenEnergyMonitor or similar) for near real-time kW
-Definition of done:
-	•	Dashboard shows cost/hour with a clear “last updated” timestamp
-
-Phase 3: Raspberry Pi fridge display
-	•	Autostart on boot, full-screen kiosk
-	•	Readable at a glance
-Definition of done:
-	•	Power cycle recovery without keyboard/mouse
-	•	Stable for at least 2 weeks of daily household use
-
-Phase 4: 2025 scenario engine (solar + battery + EV + V2H)
-	•	Build baseline 2025 bill model
-	•	Overlay solar generation, storage dispatch, EV charging, V2H rules
-Definition of done:
-	•	Scenarios produce consistent annual cost and key metrics
-	•	Results are reproducible from a single command
-
-Testing (planned)
-	•	Unit tests:
-	•	tariff and cost calculations
-	•	interval alignment and data validation
-	•	dispatch constraints (battery and EV)
-	•	Integration tests:
-	•	“pull Amber data and store it” end-to-end (mocked and live)
-	•	Sanity checks:
-	•	annual totals, seasonality, bounds checks
-
-Notes
-
-This repo deliberately keeps large datasets out of Git.
-Use a local data/ folder (often a symlink to Dropbox) for raw exports and results.
-
-Licence: MIT, see LICENSE
-Copyright (c) 2025 Sam Clifton
-
-## Historical baseline (Powerpal + Amber)
-
-Amber’s API provides long history for wholesale prices but only limited history for usage.
-To build a longer historical baseline, this project uses:
-
-- **Powerpal CSV exports** for usage (up to ~90 days per export, up to ~12 months history)
-- **Amber API** for wholesale prices over the same date ranges
-
-### Scripts
-
-**Powerpal usage → 5-minute kWh parquet**
-```bash
-python scripts/pull_powerpal.py --start YYYY-MM-DD --end YYYY-MM-DD
-```
-
-Output:
-`data_processed/powerpal/powerpal_usage_5min_<start>_<end>.parquet`
-
-**Amber prices → parquet**
-```bash
-python scripts/pull_historical.py --start YYYY-MM-DD --end YYYY-MM-DD --outdir data_processed
-```
-
-Output:
-`data_processed/prices_<start>_<end>.parquet`
-
-**Powerpal minute CSV export**
-
-Download minute-resolution CSV exports from Powerpal and load directly into Supabase.
-
-Environment variables (in `config/.env`):
-- `POWERPAL_DEVICE_ID` (e.g., `0005191c`)
-- `POWERPAL_TOKEN` (CSV export token from Powerpal)
-- `POWERPAL_SAMPLE` (default: `1`)
-- `AMBER_SITE_ID` (used as `site_id` in Supabase `usage_intervals`)
-
-Download historical windows:
+Downloads 90-day windows from Powerpal:
 
 ```bash
 python scripts/pull_powerpal_minute_csv.py --start 2024-10-01 --end 2025-03-31
 ```
 
-Output: CSV files in `data_raw/powerpal_minute/` with manifest tracking.
+Outputs CSVs to `data_raw/powerpal_minute/` with a manifest for tracking.
 
-Load a single CSV into Supabase:
+Note: Powerpal tokens are short-lived and require manual refresh.
+
+### Load into Supabase
 
 ```bash
-python scripts/load_powerpal_minute_to_supabase.py --csv data_raw/powerpal_minute/<file>.csv
+python scripts/load_powerpal_minute_to_supabase.py \
+  --csv data_raw/powerpal_minute/YOUR_FILE.csv \
+  --source powerpal \
+  --channel-type general
 ```
 
-The loader script:
-- Detects timestamp and kWh columns automatically
-- Parses timestamps as Australia/Sydney local time, converts to UTC
-- Creates 1-minute intervals for `usage_intervals` table
-- Idempotent (safe to rerun)
+The loader handles DST edge cases by treating timestamps as UTC. Inserts are idempotent (safe to rerun).
 
-**Note:** Do not commit `config/.env` or `.env.local` to git (contains tokens and secrets).
+## Raspberry Pi deployment
 
-**Timestamp alignment**
+See `docs/pi_deployment.md` for the complete setup guide.
 
-Powerpal usage is aligned exactly on 5-minute boundaries (…:00).
-Amber prices often arrive with a +1 second offset (…:01).
+### Summary
 
-During baseline modelling, Amber price timestamps are floored to 5-minute buckets to ensure perfect alignmente data.
+| Component | Path / Unit | Description |
+|-----------|-------------|-------------|
+| Dashboard service | `home-energy-dashboard.service` | Flask app (starts on boot, restarts on failure) |
+| Cache refresh timer | `home-energy-sync-cache.timer` | Cache refresh (if enabled) |
+| Kiosk script | `~/bin/home-energy-kiosk.sh` | Chromium launcher (waits for `/api/health`, launches fullscreen) |
+| Kiosk user service | `~/.config/systemd/user/home-energy-kiosk.service` | Systemd user unit for kiosk |
 
-All baseline costs are energy-only wholesale and exclude network charges, supply charges, and GST.
+### Update workflow
 
-Note: data_raw/ and data_processed/ are git-ignored and never committed.
+From the Pi:
 
+```bash
+cd ~/repos/Home-Energy-Analysis
+./pi/update.sh
+```
+
+The script pulls latest commits, reinstalls dependencies, restarts services, and runs a health check.
+
+### Verify on the Pi
+
+```bash
+sudo systemctl status home-energy-dashboard.service --no-pager -l
+systemctl --user status home-energy-kiosk.service --no-pager -l
+pgrep -a chromium | head -n 1
+curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
+
+# Optional: confirm cache refresh timer exists
+systemctl list-timers --all | grep -E "home-energy-sync-cache" || true
+```
+
+## Troubleshooting
+
+### Kiosk white screen or keyring prompt
+
+Fixed by Chromium flags in the kiosk script (`--password-store=basic`, `--use-mock-keychain`, `--disable-extensions`). See `docs/pi_deployment.md`.
+
+### Supabase connection failures
+
+- Ensure you are using the pooler hostname and port 5432.
+- Ensure the username is `postgres.<project-ref>`, not plain `postgres`.
+- If you see `SSL connection has been closed unexpectedly`, retry or restart the Supabase project.
+
+### Amber usage 429 rate limits
+
+Reduce request rate, use smaller chunk sizes, and implement backoff. This is a known limitation that needs hardening.
+
+## Roadmap
+
+### P0: Appliance reliability
+
+- Keep Pi boot-to-dashboard reliable.
+- Keep cache refresh and stale handling robust.
+
+### P1: Data reliability
+
+- Add 429-aware backoff to Amber usage backfill.
+- Cross-source reconciliation report (Powerpal vs Amber daily totals).
+- Define forward sync cadence for both sources.
+
+### P2: Modelling
+
+- Build 2025 baseline (usage + price series).
+- Overlay solar, battery, EV charging, V2H scenarios.
+- Produce ROI/payback outputs.
+
+## Licence
+
+MIT. See `LICENSE`.
+
+Copyright (c) 2025 Sam Clifton

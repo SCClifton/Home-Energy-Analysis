@@ -1,5 +1,29 @@
 # Project Progress
 
+
+## 2026-01-05
+
+* ✅ Raspberry Pi now boots straight into the Home Energy Dashboard in Chromium kiosk mode (appliance behaviour restored).
+* Implemented a systemd **user** service for kiosk (`~/.config/systemd/user/home-energy-kiosk.service`) with restart-on-failure and pre-start cleanup:
+
+  * Kills any existing Chromium session (`ExecStartPre=pkill ...`)
+  * Clears kiosk profile dir (`ExecStartPre=rm -rf /tmp/chromium-kiosk`)
+* Kiosk launch script at `~/bin/home-energy-kiosk.sh` now:
+
+  * Waits for `http://127.0.0.1:5050/api/health`
+  * Launches Chromium with stable kiosk flags including:
+
+    * `--password-store=basic` and `--use-mock-keychain` (prevents keyring prompts)
+    * `--disable-extensions` and `--disable-component-extensions-with-background-pages`
+    * `--ozone-platform=x11` plus software rendering flags (more stable for Pi kiosk)
+    * Uses a fresh profile in `/tmp/chromium-kiosk` each run
+* Verified after reboot:
+
+  * `home-energy-dashboard.service` running (Flask on port 5050)
+  * `home-energy-kiosk.service` running and opening `http://127.0.0.1:5050/`
+  * LightDM autologin active for user `sam`
+
+
 ## 2026-01-05 (Powerpal minute exports → Supabase)
 
 ### What changed

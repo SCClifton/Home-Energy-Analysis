@@ -1,185 +1,258 @@
-# Raspberry Pi Deployment – Home Energy Analysis
+Raspberry Pi deployment
 
-This document describes how the Home Energy Analysis dashboard is deployed and operated on a Raspberry Pi 5.
+This document describes how the Home Energy dashboard runs on the Raspberry Pi 5 as a small “appliance”:
 
-The Pi runs as a small, self-healing appliance:
-- boots unattended
-- refreshes Amber data on a schedule
-- serves cached data offline
-- optionally runs in fullscreen kiosk mode for a kitchen display
+boots unattended
 
----
+starts the dashboard on boot
 
-## Overview
+launches Chromium in kiosk mode on boot
 
-The Raspberry Pi runs two core components:
+serves cached data when offline, and refreshes from Amber when available
 
-1. Dashboard service
-   - Flask-based web app
-   - Serves UI and API endpoints on port 5050
-   - Starts automatically on boot via systemd
+Current known-good state
 
-2. Cache refresh job
-   - Periodically fetches Amber prices and usage
-   - Writes to a local SQLite cache
-   - Runs every 5 minutes via systemd timer
+Verified working after reboot (2026-01-05):
 
-The dashboard is designed to be offline-first. If the internet is unavailable, cached data is served.
+home-energy-dashboard.service is enabled and running (Flask app on port 5050)
 
----
+home-energy-kiosk.service is enabled and running (Chromium kiosk pointing to http://127.0.0.1:5050/)
 
-## System layout
+LightDM desktop auto-login is enabled for user sam
 
-Repository location on Pi:
-    /home/sam/repos/Home-Energy-Analysis
+X11 is in use (LightDM launches /usr/lib/xorg/Xorg :0)
 
-Python virtual environment:
-    /home/sam/repos/Home-Energy-Analysis/.venv
+Screen blanking is disabled via raspi-config
 
-Project installed in editable mode:
-    pip install -e .
+Repo layout on the Pi
 
-SQLite cache location:
-    /var/lib/home-energy-analysis/cache.sqlite
+Repo location:
 
-Environment file (not committed to Git):
-    /etc/home-energy-analysis/dashboard.env
+/home/sam/repos/Home-Energy-Analysis
 
-Environment variables:
-- AMBER_TOKEN
-- AMBER_SITE_ID
-- PORT
-- SQLITE_PATH
-- RETENTION_DAYS
-- DEBUG
+Virtual environment:
 
-Permissions:
-- owned by root
-- readable by group homeenergy
-- dashboard runs as user sam (member of homeenergy)
+/home/sam/repos/Home-Energy-Analysis/.venv
 
----
+Dashboard entrypoint:
 
-## Services
+dashboard_app/app/main.py
 
-Dashboard service
-Unit name:
-    home-energy-dashboard.service
+Secrets and environment configuration
+
+Env file on the Pi (not committed to git):
+
+/etc/home-energy-analysis/dashboard.env
+
+This typically includes:
+
+AMBER_TOKEN
+
+AMBER_SITE_ID
+
+PORT (default 5050)
+
+SQLITE_PATH
+
+RETENTION_DAYS
+
+other runtime flags used by the dashboard and cache logic
+
+Notes:
+
+Do not commit secrets.
+
+Keep the env file owned by root.
+
+The systemd unit loads this file.
+
+Services
+1) Dashboard service (system-level)
+
+Unit:
+
+home-energy-dashboard.service
 
 Purpose:
-- runs the Flask dashboard
-- restarts automatically on failure
-- starts on boot
+
+Runs the Flask dashboard (UI and API) on port 5050
+
+Restarts automatically on failure
+
+Starts on boot
 
 Common commands:
-    systemctl status home-energy-dashboard.service
-    sudo systemctl restart home-energy-dashboard.service
-    journalctl -u home-energy-dashboard.service -n 50 --no-pager
 
----
+sudo systemctl status home-energy-dashboard.service --no-pager -l
+sudo systemctl restart home-energy-dashboard.service
+journalctl -u home-energy-dashboard.service -n 100 --no-pager
 
-Cache refresh service
-Unit name:
-    home-energy-sync-cache.service
+Health checks:
+
+curl -fsS http://127.0.0.1:5050/ | head
+curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
+
+Note on /api/health:
+
+data_source can be cache even when live price fetch is working (this depends on endpoint behaviour and caching rules).
+
+status may show stale if usage cache is old. This does not prevent the UI from loading.
+
+2) Kiosk service (user-level)
+
+This is what makes the Pi boot straight into the dashboard display.
+
+Files:
+
+Script: ~/bin/home-energy-kiosk.sh
+
+systemd user unit: ~/.config/systemd/user/home-energy-kiosk.service
+
+Optional log file: ~/logs/kiosk.log
 
 Purpose:
-- one-shot job to refresh SQLite cache from Amber
 
-Manual run:
-    sudo systemctl start home-energy-sync-cache.service
-    journalctl -u home-energy-sync-cache.service -n 50 --no-pager
+Waits for /api/health to respond
 
----
+Launches Chromium in kiosk mode to http://127.0.0.1:5050/
 
-Cache refresh timer
-Unit name:
-    home-energy-sync-cache.timer
+Prevents keyring prompts (important for kiosk)
 
-Schedule:
-- runs every 5 minutes
-- includes small randomised delay
+Disables extensions and background component extensions (stability)
 
-Status:
-    systemctl status home-energy-sync-cache.timer
-    systemctl list-timers --all | grep home-energy
+Forces X11 (--ozone-platform=x11) and software rendering flags (prevents white screen issues)
 
----
+Enable and start:
 
-## Health checks
+systemctl --user daemon-reload
+systemctl --user enable --now home-energy-kiosk.service
+systemctl --user status home-energy-kiosk.service --no-pager -l
 
-Dashboard:
-    http://localhost:5050/
+Verify Chromium is running with the expected flags:
 
-Health endpoint:
-    http://localhost:5050/api/health
+pgrep -a chromium | head -n 1
 
-Returns JSON including:
-- data source (live or cache)
-- cache age
-- status (ok, stale, or unknown)
+Expected flags include:
 
----
+--password-store=basic
 
-## Update workflow
+--use-mock-keychain
 
-All development happens on a Mac and is pushed to GitHub.
+--disable-extensions
 
-To update the Pi:
-    ssh sam@<pi-ip>
-    cd ~/repos/Home-Energy-Analysis
-    ./pi/update.sh
+--disable-component-extensions-with-background-pages
 
-The update script:
-- verifies clean main branch
-- pulls latest commits
-- reinstalls Python dependencies
-- restarts services
-- triggers an immediate cache refresh
-- prints service status and health output
+--ozone-platform=x11
 
----
+--user-data-dir=/tmp/chromium-kiosk
 
-## Kiosk mode (optional)
+URL ends with http://127.0.0.1:5050/
 
-Kiosk launch script:
-    /home/sam/bin/home-energy-kiosk.sh
+Notes:
 
-Autostart entry:
-    ~/.config/autostart/home-energy-kiosk.desktop
+The user service includes ExecStartPre steps to kill any existing Chromium and clear /tmp/chromium-kiosk.
 
-Behaviour:
-- waits for /api/health
-- launches Chromium fullscreen
-- disables screen blanking
-- hides mouse cursor
+pkill may exit with status 1 when there is no Chromium to kill, that is fine.
 
----
+Desktop and display configuration
 
-## SSH access
+The kiosk relies on a graphical session being available.
 
-From another machine on the same network:
-    ssh sam@<pi-ip>
+Current setup:
 
-The Pi is fully operable over SSH without keyboard, mouse, or monitor.
+Display manager: LightDM
 
----
+Auto-login enabled for user sam
 
-## Notes and cautions
+X11 in use (Xorg running on :0)
 
-- do not commit secrets (dashboard.env is outside the repo)
-- avoid editing code directly on the Pi
-- preferred workflow:
-  - edit on Mac
-  - commit and push
-  - pull via ./pi/update.sh
-- Flask dev server is acceptable for this appliance
+Screen blanking disabled
 
----
+Check LightDM and Xorg:
 
-## Recovery
+systemctl status lightdm --no-pager -l
+
+raspi-config settings to confirm:
+
+System Options → Boot → Desktop
+
+System Options → Auto Login → Desktop Autologin
+
+Display Options → Screen Blanking → Disable
+
+Advanced Options → X11 (or equivalent option on your image) enabled
+
+Update workflow
+
+Preferred workflow:
+
+develop on Mac
+
+commit and push to GitHub
+
+pull and restart services on the Pi
+
+On the Pi:
+
+cd ~/repos/Home-Energy-Analysis
+./pi/update.sh
+
+After updating, verify:
+
+sudo systemctl status home-energy-dashboard.service --no-pager -l
+systemctl --user status home-energy-kiosk.service --no-pager -l
+curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
+Troubleshooting
+Dashboard not loading
+
+Check service:
+
+sudo systemctl status home-energy-dashboard.service --no-pager -l
+journalctl -u home-energy-dashboard.service -n 200 --no-pager
+
+Check health endpoint:
+
+curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
+Kiosk shows a white screen or prompts for a keyring
+
+This was fixed by running Chromium with:
+
+--password-store=basic --use-mock-keychain
+
+--disable-extensions --disable-component-extensions-with-background-pages
+
+--ozone-platform=x11 and software rendering flags
+
+Check running Chromium flags:
+
+pgrep -a chromium | head -n 1
+
+Restart kiosk:
+
+systemctl --user restart home-energy-kiosk.service
+tail -n 200 ~/logs/kiosk.log || true
+Kiosk does not start after reboot
+
+Confirm LightDM auto-login is working:
+
+systemctl status lightdm --no-pager -l
+
+Confirm kiosk service is enabled:
+
+systemctl --user is-enabled home-energy-kiosk.service
+systemctl --user status home-energy-kiosk.service --no-pager -l
+
+Manually restart:
+
+systemctl --user restart home-energy-kiosk.service
+Recovery behaviour
 
 If the Pi loses power:
-- it will reboot
-- services restart automatically
-- cached data remains available
-- dashboard recovers without intervention
+
+it reboots
+
+LightDM auto-logs in sam
+
+the dashboard service restarts automatically
+
+Chromium kiosk restarts automatically and loads the dashboard
