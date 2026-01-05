@@ -1,5 +1,35 @@
 # Project Progress
 
+## 2026-01-05 (Powerpal minute exports → Supabase)
+
+### What changed
+
+* Added a Powerpal minute-resolution CSV export pipeline:
+
+  * `scripts/pull_powerpal_minute_csv.py` downloads CSV exports in 90-day windows (Australia/Sydney epoch boundaries), writes a manifest with hashes, and redacts tokens in logs.
+  * `scripts/load_powerpal_minute_to_supabase.py` loads CSV exports into Supabase `usage_intervals` (`source='powerpal'`) with idempotent upserts and ingest provenance (`ingest_events`).
+* Fixed DST parsing issues in the Powerpal loader:
+
+  * If timestamp column is `datetime_utc`, parse directly as UTC (avoids DST ambiguous/non-existent local times).
+  * If local timestamps are used, localise to Australia/Sydney with DST-safe handling then convert to UTC.
+
+### What was tested
+
+* Confirmed Powerpal tokenised CSV links can return full minute data for supported ranges.
+* Successfully downloaded and loaded multiple 90-day windows into Supabase (minute intervals), including partial-day behaviour for “today”.
+* Confirmed some older requested windows can return header-only CSVs (no data available for that period at minute resolution), and these are skipped during load.
+
+### Notes / limitations
+
+* Powerpal export tokens are short-lived (app-generated). Current workflow supports bulk download within token validity, longer-term automation may require periodic token refresh or a different metering device.
+* Some early historical ranges (e.g. Oct–Dec 2024) returned empty header-only minute exports, likely due to data availability/retention for minute exports.
+
+### Next steps
+
+* Decide whether to pursue older history via alternative export settings (if available) or accept the earliest minute-available start date.
+* Add a simple “weekly refresh” workflow: generate a new token in the app, download last 7 days, load to Supabase, and compare against Amber.
+
+
 ## 2026-01-03 (Supabase storage + historical prices backfill)
 
 ### What changed

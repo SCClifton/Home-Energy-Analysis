@@ -345,6 +345,38 @@ python scripts/pull_historical.py --start YYYY-MM-DD --end YYYY-MM-DD --outdir d
 Output:
 `data_processed/prices_<start>_<end>.parquet`
 
+**Powerpal minute CSV export**
+
+Download minute-resolution CSV exports from Powerpal and load directly into Supabase.
+
+Environment variables (in `config/.env`):
+- `POWERPAL_DEVICE_ID` (e.g., `0005191c`)
+- `POWERPAL_TOKEN` (CSV export token from Powerpal)
+- `POWERPAL_SAMPLE` (default: `1`)
+- `AMBER_SITE_ID` (used as `site_id` in Supabase `usage_intervals`)
+
+Download historical windows:
+
+```bash
+python scripts/pull_powerpal_minute_csv.py --start 2024-10-01 --end 2025-03-31
+```
+
+Output: CSV files in `data_raw/powerpal_minute/` with manifest tracking.
+
+Load a single CSV into Supabase:
+
+```bash
+python scripts/load_powerpal_minute_to_supabase.py --csv data_raw/powerpal_minute/<file>.csv
+```
+
+The loader script:
+- Detects timestamp and kWh columns automatically
+- Parses timestamps as Australia/Sydney local time, converts to UTC
+- Creates 1-minute intervals for `usage_intervals` table
+- Idempotent (safe to rerun)
+
+**Note:** Do not commit `config/.env` or `.env.local` to git (contains tokens and secrets).
+
 **Timestamp alignment**
 
 Powerpal usage is aligned exactly on 5-minute boundaries (…:00).
