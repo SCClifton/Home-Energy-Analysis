@@ -17,8 +17,6 @@ sudo nmap -sn 192.168.4.0/22
 ssh sam@192.168.5.210
 ```
 
-Optional: check router leases or the eero app for the assigned IP.
-
 Mac SSH alias (recommended for convenience):
 
 ```bash
@@ -33,27 +31,6 @@ Then connect with:
 
 ```bash
 ssh home-energy-pi
-```
-
-Common commands:
-
-```bash
-ssh sam@<ip>
-cd ~/repos/Home-Energy-Analysis
-git pull
-source .venv/bin/activate
-pip install -r requirements.txt
-systemctl status home-energy-dashboard.service --no-pager
-journalctl -u home-energy-dashboard.service -n 100 --no-pager
-```
-
-Enable/check timers + logs:
-
-```bash
-sudo systemctl enable --now home-energy-supabase-keepalive.timer
-sudo systemctl enable --now home-energy-supabase-forward-sync.timer
-journalctl -u home-energy-supabase-forward-sync.service -n 50 --no-pager
-journalctl -u home-energy-supabase-keepalive.service -n 50 --no-pager
 ```
 
 Note: `.local` hostname resolution can be unreliable, so prefer the IP or the SSH config alias.
@@ -77,6 +54,7 @@ Verified working after reboot (2026-01-05):
 - Repo location: `/home/sam/repos/Home-Energy-Analysis`
 - Virtual environment: `/home/sam/repos/Home-Energy-Analysis/.venv`
 - Dashboard entrypoint: `dashboard_app/app/main.py`
+- Cache/data location (if configured): `/var/lib/home-energy-analysis`
 
 ## Where secrets live
 
@@ -97,7 +75,7 @@ Keys:
 - `SUPABASE_DB_URL` (recommended so services can share it)
 - `PORT` (5050)
 - `RETENTION_DAYS`
-- `SQLITE_PATH` and other runtime flags used by the dashboard and cache logic
+- `SQLITE_PATH` (typically under `/var/lib/home-energy-analysis`) and other runtime flags used by the dashboard and cache logic
 
 Example (no real secrets):
 
@@ -179,6 +157,8 @@ systemctl --user status home-energy-kiosk.service --no-pager -l
 
 Optional daily ping to keep Supabase free-tier active.
 
+Uses `EnvironmentFile=/etc/home-energy-analysis/dashboard.env`.
+
 Schedule:
 
 - Daily at 01:45
@@ -196,6 +176,7 @@ sudo systemctl enable --now home-energy-supabase-keepalive.timer
 Check logs:
 
 ```bash
+sudo systemctl status home-energy-supabase-keepalive.service --no-pager -l
 sudo systemctl status home-energy-supabase-keepalive.timer --no-pager -l
 journalctl -u home-energy-supabase-keepalive.service -n 50 --no-pager
 ```
@@ -209,6 +190,8 @@ sudo systemctl start home-energy-supabase-keepalive.service
 ### 4) Supabase forward sync (system-level)
 
 Daily sync of recent Amber prices and usage into Supabase (idempotent).
+
+Uses `EnvironmentFile=/etc/home-energy-analysis/dashboard.env`.
 
 Schedule:
 
@@ -227,6 +210,7 @@ sudo systemctl enable --now home-energy-supabase-forward-sync.timer
 Check logs:
 
 ```bash
+sudo systemctl status home-energy-supabase-forward-sync.service --no-pager -l
 sudo systemctl status home-energy-supabase-forward-sync.timer --no-pager -l
 journalctl -u home-energy-supabase-forward-sync.service -n 50 --no-pager
 ```
@@ -237,13 +221,14 @@ Run now:
 sudo systemctl start home-energy-supabase-forward-sync.service
 ```
 
-## Verification commands
+## Verify it's working
 
 ```bash
-ss -ltnp | grep 5050
-curl -sS localhost:5050/api/health
-systemctl list-timers --all --no-pager | grep -i supabase
-journalctl -u home-energy-supabase-forward-sync.service --since "10 min ago" --no-pager
+sudo systemctl status home-energy-dashboard.service --no-pager -l
+curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
+sudo systemctl list-timers --all | grep home-energy
+journalctl -u home-energy-supabase-forward-sync.service -n 80 --no-pager
+journalctl -u home-energy-supabase-keepalive.service -n 50 --no-pager
 ```
 
 ## Verify Chromium flags
@@ -354,6 +339,14 @@ curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
 - Confirm `/etc/home-energy-analysis/dashboard.env` includes `AMBER_TOKEN` and `AMBER_SITE_ID`.
 - If Supabase jobs fail, ensure `SUPABASE_DB_URL` is set in `dashboard.env` or `.env.local`.
 - The forward-sync service reads `dashboard.env`, so missing keys will show up in its journal logs.
+
+### Common failures
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `SUPABASE_DB_URL` missing | Not set in `dashboard.env` | Add it to `/etc/home-energy-analysis/dashboard.env` and retry the job. |
+| `AMBER_TOKEN` missing | Not set in `dashboard.env` | Add it to `/etc/home-energy-analysis/dashboard.env` and restart the service. |
+| Forward sync shows “0 usage rows” | Amber returned no usage for that window | Retry the next day; confirm `AMBER_SITE_ID` and channel type settings. |
 
 ### Kiosk shows a white screen or prompts for a keyring
 

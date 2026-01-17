@@ -30,6 +30,12 @@ Out of scope (initially):
 - Heavy front-end frameworks
 - Home Assistant integration (optional later)
 
+## 2.5 Current status
+
+- Pi dashboard appliance is running with an offline-first SQLite cache and kiosk mode.
+- Supabase ingestion exists for prices and Powerpal minute usage.
+- Next modelling phase depends on baseline reconciliation and stable usage ingestion.
+
 ## 3. Data sources
 
 ### 3.1 Amber Electric API (prices + usage)
@@ -61,6 +67,12 @@ High level flow:
 Key principle:
 - Avoid live API calls from the dashboard page.
 - Ingestion writes data, dashboard reads data.
+
+### Local + Supabase split (ops hygiene)
+
+- Local SQLite cache keeps the appliance reliable and offline-first.
+- Supabase Postgres is the durable historical store for analysis and modelling.
+- Daily keepalive and daily forward-sync jobs keep Supabase warm and current.
 
 ## 5. Project phases
 
@@ -141,6 +153,23 @@ Definition of done:
 - Dashboard loads automatically within a reasonable time after boot.
 - Stable for at least 2 weeks of household use.
 
+### Phase 3.5: Historical data pipeline hardening
+
+Goals:
+- Make the historical pipeline reliable, idempotent, and observable.
+
+Deliverables:
+- Amber price backfill (done/mostly done; confirm coverage and gaps).
+- Amber usage ingestion with throttling/backoff and clear rate-limit handling (limits acknowledged).
+- Powerpal minute CSV pipeline for usage history (if in scope).
+- Idempotent upserts and provenance tracking via `ingest_events`.
+
+Definition of done:
+- Forward sync runs unattended for 14 days.
+- Dashboard loads even when Amber is down (SQLite cache serves data).
+- Supabase has continuous last-N-days data for both price and usage.
+- Log visibility via journald (e.g. `journalctl -u home-energy-supabase-forward-sync.service --since "10 min ago" --no-pager`).
+
 ### Phase 4: 2025 scenario engine (solar + battery + EV + V2H)
 Goal:
 - Use 2025 interval data (prices + usage) as the baseline.
@@ -217,6 +246,13 @@ Sanity checks:
 - annual energy and cost totals match expectations
 - SOC never violates min/max constraints
 - no negative loads, no impossible exports unless explicitly modelled
+
+## Next actions
+
+1. Confirm forward-sync logs show daily runs and no errors for a 14-day window.
+2. Validate Supabase last-N-days coverage for both prices and usage.
+3. Tune Amber usage throttling/backoff and retry behaviour.
+4. Update Pi operational docs as services evolve.
 
 ## 9. Documentation and project tracking
 

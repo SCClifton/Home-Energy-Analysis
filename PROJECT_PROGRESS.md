@@ -3,12 +3,16 @@
 
 ## 2026-01-17
 
-* Added a daily Supabase keepalive script and systemd timer (`scripts/supabase_keepalive.py`, `pi/systemd/home-energy-supabase-keepalive.*`).
-* Added a daily forward sync job to keep recent Amber prices/usage flowing into Supabase (idempotent, systemd-timed).
-* Regained SSH access to the Pi at `192.168.5.210` and updated deployment docs with the stable IP + SSH alias guidance.
-* Docs: added Pi Quick Start + cleaned `docs/pi_deployment.md`.
-* Docs: added Pi SSH quick start, env var location, and Supabase timer schedules + troubleshooting.
-* Docs: aligned Pi env/service paths, secrets location, and verification commands with current systemd setup.
+* Added a Supabase keepalive script and systemd timer (`scripts/supabase_keepalive.py`, `pi/systemd/home-energy-supabase-keepalive.*`).
+* Added a forward sync job and systemd timer to keep recent Amber prices/usage flowing into Supabase (idempotent, daily).
+* Updated deployment docs with stable IP, SSH alias guidance, and env/service paths for Pi systemd units.
+* Standardised secrets: `SUPABASE_DB_URL` now lives in `/etc/home-energy-analysis/dashboard.env` (mirrors repo `.env.local` on the Pi).
+* Forward sync + keepalive confirmed running under systemd; prior failures expecting `config/.env` for `AMBER_TOKEN` are being phased out.
+* Verification:
+  * `sudo systemctl status home-energy-dashboard.service --no-pager -l`
+  * `journalctl -u home-energy-supabase-forward-sync.service -n 80 --no-pager`
+  * `journalctl -u home-energy-supabase-keepalive.service -n 50 --no-pager`
+  * `curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool`
 
 
 ## 2026-01-05

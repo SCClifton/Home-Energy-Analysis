@@ -16,11 +16,11 @@ The Pi runs as an offline-first appliance using a local SQLite cache. Supabase P
 
 ### Working
 
-- Raspberry Pi boots straight into the dashboard in Chromium kiosk mode.
+- Raspberry Pi runs as an offline-first appliance (SQLite cache) and boots into Chromium kiosk mode.
 - Dashboard runs as a systemd service (`home-energy-dashboard.service`) on port 5050.
-- Cache refresh timer (if enabled on the Pi) refreshes data via `home-energy-sync-cache.timer`.
-- Supabase Postgres is stable via pooler session mode (port 5432).
-- Amber prices backfilled into Supabase from 2024-06-16 to present.
+- Supabase keepalive timer exists to prevent free-tier pausing.
+- Supabase forward sync runs daily and is idempotent.
+- Amber prices are backfilled into Supabase from 2024-06-16 to present.
 - Powerpal minute CSV pipeline downloads and loads into Supabase (from 2024-12-30 onward).
 
 ### Known limitations
@@ -66,15 +66,16 @@ Local-only (gitignored):
 
 ## Secrets and environment
 
-Do not commit secrets.
+Never commit secrets.
 
 ### Local dev (Mac)
 
-Create `config/.env` (not committed):
+Use `.env.local` (gitignored) and/or export env vars in your shell.
 
 ```bash
 AMBER_TOKEN=your_token_here
 AMBER_SITE_ID=your_site_id_here
+SUPABASE_DB_URL=postgresql://USER:PASSWORD@HOST:PORT/postgres
 PORT=5050
 
 # Powerpal (usage backfill)
@@ -83,15 +84,11 @@ POWERPAL_TOKEN=your_token
 POWERPAL_SAMPLE=1
 ```
 
-Create `.env.local` in the repo root (not committed):
-
-```bash
-SUPABASE_DB_URL=postgresql://USER:PASSWORD@HOST:PORT/postgres
-```
-
 ### Raspberry Pi
 
-Runtime environment is stored at `/etc/home-energy-analysis/dashboard.env` (not committed). Contains `AMBER_TOKEN`, `AMBER_SITE_ID`, `PORT`, `SQLITE_PATH`, `RETENTION_DAYS`, `DEBUG`.
+Runtime environment is stored at `/etc/home-energy-analysis/dashboard.env` (not committed, root-owned). Systemd services load it via `EnvironmentFile=`.
+
+Keys include `AMBER_TOKEN`, `AMBER_SITE_ID`, `SUPABASE_DB_URL`, `PORT`, `SQLITE_PATH`, `RETENTION_DAYS`, `DEBUG`.
 
 ## Local development quickstart (Mac)
 
@@ -199,25 +196,20 @@ The loader handles DST edge cases by treating timestamps as UTC. Inserts are ide
 
 See `docs/pi_deployment.md` for the complete setup guide.
 
+Pi systemd services use `/etc/home-energy-analysis/dashboard.env`.
+
 ### Summary
 
 | Component | Path / Unit | Description |
 |-----------|-------------|-------------|
 | Dashboard service | `home-energy-dashboard.service` | Flask app (starts on boot, restarts on failure) |
 | Cache refresh timer | `home-energy-sync-cache.timer` | Cache refresh (if enabled) |
+| Supabase keepalive service | `home-energy-supabase-keepalive.service` | Prevents Supabase free-tier pausing |
+| Supabase keepalive timer | `home-energy-supabase-keepalive.timer` | Daily keepalive |
+| Supabase forward sync service | `home-energy-supabase-forward-sync.service` | Daily forward sync of prices/usage |
+| Supabase forward sync timer | `home-energy-supabase-forward-sync.timer` | Daily forward sync schedule |
 | Kiosk script | `~/bin/home-energy-kiosk.sh` | Chromium launcher (waits for `/api/health`, launches fullscreen) |
 | Kiosk user service | `~/.config/systemd/user/home-energy-kiosk.service` | Systemd user unit for kiosk |
-
-### Update workflow
-
-From the Pi:
-
-```bash
-cd ~/repos/Home-Energy-Analysis
-./pi/update.sh
-```
-
-The script pulls latest commits, reinstalls dependencies, restarts services, and runs a health check.
 
 ### Verify on the Pi
 
