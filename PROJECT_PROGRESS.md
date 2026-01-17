@@ -6,6 +6,9 @@
 * Added a daily Supabase keepalive script and systemd timer (`scripts/supabase_keepalive.py`, `pi/systemd/home-energy-supabase-keepalive.*`).
 * Added a daily forward sync job to keep recent Amber prices/usage flowing into Supabase (idempotent, systemd-timed).
 * Regained SSH access to the Pi at `192.168.5.210` and updated deployment docs with the stable IP + SSH alias guidance.
+* Docs: added Pi Quick Start + cleaned `docs/pi_deployment.md`.
+* Docs: added Pi SSH quick start, env var location, and Supabase timer schedules + troubleshooting.
+* Docs: aligned Pi env/service paths, secrets location, and verification commands with current systemd setup.
 
 
 ## 2026-01-05

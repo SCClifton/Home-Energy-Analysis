@@ -7,17 +7,21 @@ This document describes how the Home Energy dashboard runs on the Raspberry Pi 5
 - Launches Chromium in kiosk mode on boot.
 - Serves cached data when offline, and refreshes from Amber when available.
 
-## Quick Start (SSH into the Pi)
+## Pi Quick Start
 
-Primary method (preferred):
+Find the Pi and SSH in (mDNS can be unreliable, so prefer IP):
 
 ```bash
+sudo nmap -sn 192.168.4.0/22
+# Look for "Raspberry Pi (Trading)" and note the IP.
 ssh sam@192.168.5.210
 ```
 
+Optional: check router leases or the eero app for the assigned IP.
+
 Mac SSH alias (recommended for convenience):
 
-```
+```bash
 Host home-energy-pi
   HostName 192.168.5.210
   User sam
@@ -31,16 +35,25 @@ Then connect with:
 ssh home-energy-pi
 ```
 
-If it stops working (IP discovery):
-
-```bash
-sudo nmap -sn 192.168.4.0/22
-```
-
-Look for the entry labeled "Raspberry Pi (Trading)", note the IP (example: `192.168.5.210`), then:
+Common commands:
 
 ```bash
 ssh sam@<ip>
+cd ~/repos/Home-Energy-Analysis
+git pull
+source .venv/bin/activate
+pip install -r requirements.txt
+systemctl status home-energy-dashboard.service --no-pager
+journalctl -u home-energy-dashboard.service -n 100 --no-pager
+```
+
+Enable/check timers + logs:
+
+```bash
+sudo systemctl enable --now home-energy-supabase-keepalive.timer
+sudo systemctl enable --now home-energy-supabase-forward-sync.timer
+journalctl -u home-energy-supabase-forward-sync.service -n 50 --no-pager
+journalctl -u home-energy-supabase-keepalive.service -n 50 --no-pager
 ```
 
 Note: `.local` hostname resolution can be unreliable, so prefer the IP or the SSH config alias.
@@ -65,18 +78,38 @@ Verified working after reboot (2026-01-05):
 - Virtual environment: `/home/sam/repos/Home-Energy-Analysis/.venv`
 - Dashboard entrypoint: `dashboard_app/app/main.py`
 
-## Secrets and environment configuration
+## Where secrets live
 
-Env file on the Pi (not committed to git): `/etc/home-energy-analysis/dashboard.env`
+Primary env file on the Pi (root-owned, not in git):
 
-This typically includes:
+`/etc/home-energy-analysis/dashboard.env`
+
+Used by these systemd services via `EnvironmentFile=`:
+
+- `home-energy-dashboard.service`
+- `home-energy-supabase-forward-sync.service`
+- `home-energy-supabase-keepalive.service`
+
+Keys:
 
 - `AMBER_TOKEN`
 - `AMBER_SITE_ID`
-- `PORT` (default 5050)
-- `SQLITE_PATH`
+- `SUPABASE_DB_URL` (recommended so services can share it)
+- `PORT` (5050)
 - `RETENTION_DAYS`
-- Other runtime flags used by the dashboard and cache logic
+- `SQLITE_PATH` and other runtime flags used by the dashboard and cache logic
+
+Example (no real secrets):
+
+```bash
+AMBER_TOKEN=...
+AMBER_SITE_ID=...
+SUPABASE_DB_URL=...
+```
+
+Optional local override (repo-local, not committed):
+
+- `~/.env.local` can hold `SUPABASE_DB_URL` only if you do not put it in `dashboard.env` (chmod 600).
 
 Notes:
 
@@ -146,6 +179,11 @@ systemctl --user status home-energy-kiosk.service --no-pager -l
 
 Optional daily ping to keep Supabase free-tier active.
 
+Schedule:
+
+- Daily at 01:45
+- `Persistent=true` (runs on boot if missed)
+
 Install:
 
 ```bash
@@ -162,9 +200,20 @@ sudo systemctl status home-energy-supabase-keepalive.timer --no-pager -l
 journalctl -u home-energy-supabase-keepalive.service -n 50 --no-pager
 ```
 
+Run now:
+
+```bash
+sudo systemctl start home-energy-supabase-keepalive.service
+```
+
 ### 4) Supabase forward sync (system-level)
 
 Daily sync of recent Amber prices and usage into Supabase (idempotent).
+
+Schedule:
+
+- Daily at 02:15
+- `Persistent=true` (runs on boot if missed)
 
 Install:
 
@@ -182,10 +231,19 @@ sudo systemctl status home-energy-supabase-forward-sync.timer --no-pager -l
 journalctl -u home-energy-supabase-forward-sync.service -n 50 --no-pager
 ```
 
-List timers:
+Run now:
 
 ```bash
-systemctl list-timers --all --no-pager | grep supabase
+sudo systemctl start home-energy-supabase-forward-sync.service
+```
+
+## Verification commands
+
+```bash
+ss -ltnp | grep 5050
+curl -sS localhost:5050/api/health
+systemctl list-timers --all --no-pager | grep -i supabase
+journalctl -u home-energy-supabase-forward-sync.service --since "10 min ago" --no-pager
 ```
 
 ## Verify Chromium flags
@@ -236,77 +294,114 @@ systemctl status lightdm --no-pager -l
 - Display Options -> Screen Blanking -> Disable
 - Advanced Options -> X11 (or equivalent option on your image) enabled
 
-Update workflow
+## Update workflow
 
 Preferred workflow:
 
-develop on Mac
-
-commit and push to GitHub
-
-pull and restart services on the Pi
+- Develop on Mac.
+- Commit and push to GitHub.
+- Pull and restart services on the Pi.
 
 On the Pi:
 
+```bash
 cd ~/repos/Home-Energy-Analysis
 ./pi/update.sh
+```
 
 After updating, verify:
 
+```bash
 sudo systemctl status home-energy-dashboard.service --no-pager -l
 systemctl --user status home-energy-kiosk.service --no-pager -l
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
-Troubleshooting
-Dashboard not loading
+```
+
+## Troubleshooting
+
+### Journal logs
+
+- Old journal entries can show earlier failures; check recent entries with `--since "10 min ago"`.
+- Check `ExecMainStatus` in `systemctl status` to confirm the most recent exit code.
+
+### SSH or hostname issues
+
+- `.local` hostname resolution can fail on macOS; use the IP from `nmap`.
+- `ipconfig getifaddr en0` can occasionally return a broadcast address like `192.168.4.255`; use `nmap` or router leases instead.
+- If the IP changed, rerun:
+
+```bash
+sudo nmap -sn 192.168.4.0/22
+```
+
+### Dashboard not loading
 
 Check service:
 
+```bash
 sudo systemctl status home-energy-dashboard.service --no-pager -l
 journalctl -u home-energy-dashboard.service -n 200 --no-pager
+```
 
 Check health endpoint:
 
+```bash
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
-Kiosk shows a white screen or prompts for a keyring
+```
+
+### Missing AMBER_TOKEN or SUPABASE_DB_URL
+
+- Confirm `/etc/home-energy-analysis/dashboard.env` includes `AMBER_TOKEN` and `AMBER_SITE_ID`.
+- If Supabase jobs fail, ensure `SUPABASE_DB_URL` is set in `dashboard.env` or `.env.local`.
+- The forward-sync service reads `dashboard.env`, so missing keys will show up in its journal logs.
+
+### Kiosk shows a white screen or prompts for a keyring
 
 This was fixed by running Chromium with:
 
---password-store=basic --use-mock-keychain
-
---disable-extensions --disable-component-extensions-with-background-pages
-
---ozone-platform=x11 and software rendering flags
+- `--password-store=basic --use-mock-keychain`
+- `--disable-extensions --disable-component-extensions-with-background-pages`
+- `--ozone-platform=x11` and software rendering flags
 
 Check running Chromium flags:
 
+```bash
 pgrep -a chromium | head -n 1
+```
 
 Restart kiosk:
 
+```bash
 systemctl --user restart home-energy-kiosk.service
 tail -n 200 ~/logs/kiosk.log || true
-Kiosk does not start after reboot
+```
+
+### Kiosk does not start after reboot
 
 Confirm LightDM auto-login is working:
 
+```bash
 systemctl status lightdm --no-pager -l
+```
 
 Confirm kiosk service is enabled:
 
+```bash
 systemctl --user is-enabled home-energy-kiosk.service
 systemctl --user status home-energy-kiosk.service --no-pager -l
+```
 
 Manually restart:
 
+```bash
 systemctl --user restart home-energy-kiosk.service
-Recovery behaviour
+```
+
+## Recovery behaviour
 
 If the Pi loses power:
 
-it reboots
-
-LightDM auto-logs in sam
-
-the dashboard service restarts automatically
-
-Chromium kiosk restarts automatically and loads the dashboard
+- It reboots.
+- LightDM auto-logs in `sam`.
+- The dashboard service restarts automatically.
+- Chromium kiosk restarts automatically and loads the dashboard.
