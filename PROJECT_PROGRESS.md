@@ -1,6 +1,11 @@
 # Project Progress
 
 
+## 2026-01-17
+
+* Added a daily Supabase keepalive script and systemd timer (`scripts/supabase_keepalive.py`, `pi/systemd/home-energy-supabase-keepalive.*`).
+
+
 ## 2026-01-05
 
 * ✅ Raspberry Pi now boots straight into the Home Energy Dashboard in Chromium kiosk mode (appliance behaviour restored).

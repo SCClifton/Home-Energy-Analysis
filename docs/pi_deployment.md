@@ -128,6 +128,22 @@ systemctl --user daemon-reload
 systemctl --user enable --now home-energy-kiosk.service
 systemctl --user status home-energy-kiosk.service --no-pager -l
 
+3) Supabase keepalive (system-level)
+
+Optional daily ping to keep Supabase free-tier active.
+
+Install:
+
+sudo cp ~/repos/Home-Energy-Analysis/pi/systemd/home-energy-supabase-keepalive.service /etc/systemd/system/
+sudo cp ~/repos/Home-Energy-Analysis/pi/systemd/home-energy-supabase-keepalive.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now home-energy-supabase-keepalive.timer
+
+Check logs:
+
+sudo systemctl status home-energy-supabase-keepalive.timer --no-pager -l
+journalctl -u home-energy-supabase-keepalive.service -n 50 --no-pager
+
 Verify Chromium is running with the expected flags:
 
 pgrep -a chromium | head -n 1
