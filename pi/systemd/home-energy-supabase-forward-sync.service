@@ -1,0 +1,14 @@
+[Unit]
+Description=Home Energy Supabase forward sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sam
+Group=sam
+WorkingDirectory=/home/sam/repos/Home-Energy-Analysis
+ExecStart=/home/sam/repos/Home-Energy-Analysis/.venv/bin/python /home/sam/repos/Home-Energy-Analysis/scripts/forward_sync_supabase.py --days-back 3
+
+[Install]
+WantedBy=multi-user.target
