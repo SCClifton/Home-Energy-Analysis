@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home Energy Simulation</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='simulation.css') }}">
+</head>
+<body>
+  <div class="sim-kiosk">
+    <header class="sim-header">
+      <div class="sim-brand-row">
+        <div class="sim-brand">Digital Twin</div>
+        <span id="sim-mode" class="sim-pill">OPTIMIZER</span>
+      </div>
+      <div class="sim-header-right">
+        <nav class="nav-links" aria-label="Main">
+          <a class="nav-link" href="/">Dashboard</a>
+          <a class="nav-link active" href="/simulation">Simulation</a>
+        </nav>
+        <span id="sim-clock" class="sim-clock">--:--</span>
+      </div>
+    </header>
+
+    <main class="sim-main">
+      <section class="sim-metrics">
+        <article class="sim-card highlight">
+          <h2>Today Savings</h2>
+          <p class="metric-value" id="today-savings">$0.00</p>
+          <p class="metric-sub" id="sim-asof">As of --</p>
+        </article>
+        <article class="sim-card">
+          <h2>MTD Savings</h2>
+          <p class="metric-value" id="mtd-savings">$0.00</p>
+          <p class="metric-sub">Australia/Sydney month window</p>
+        </article>
+        <article class="sim-card">
+          <h2>Battery SoC</h2>
+          <p class="metric-value" id="battery-soc">0.0 kWh</p>
+          <p class="metric-sub" id="sim-status">Status: waiting</p>
+        </article>
+        <article class="sim-card">
+          <h2>Solar Today</h2>
+          <p class="metric-value" id="solar-today">0.0 kWh</p>
+          <p class="metric-sub">10 kW hypothetical PV</p>
+        </article>
+        <article class="sim-card">
+          <h2>Export Revenue</h2>
+          <p class="metric-value" id="export-revenue">$0.00</p>
+          <p class="metric-sub">Estimated from interval exports</p>
+        </article>
+        <article class="sim-card">
+          <h2>Next 24h Savings</h2>
+          <p class="metric-value" id="forecast-savings">$0.00</p>
+          <p class="metric-sub">Price + usage projection</p>
+        </article>
+      </section>
+
+      <section class="sim-chart-card">
+        <div class="chart-head">
+          <h2>Interval Savings (Today)</h2>
+          <span id="chart-state" class="chart-state">Loading...</span>
+        </div>
+        <div id="interval-chart" class="interval-chart" role="img" aria-label="Interval savings chart"></div>
+      </section>
+    </main>
+
+    <footer class="sim-footer">
+      <div id="sim-footer-message">Simulation uses cached data when offline.</div>
+    </footer>
+  </div>
+
+  <script src="{{ url_for('static', filename='simulation.js') }}"></script>
+</body>
+</html>

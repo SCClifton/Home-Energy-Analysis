@@ -60,6 +60,34 @@ body {
     gap: 16px;
 }
 
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.nav-links {
+    display: inline-flex;
+    gap: 8px;
+}
+
+.nav-link {
+    text-decoration: none;
+    color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+
+.nav-link.active {
+    color: #0F172A;
+    background: #93C5FD;
+    border-color: #93C5FD;
+}
+
 .brand {
     display: flex;
     align-items: center;

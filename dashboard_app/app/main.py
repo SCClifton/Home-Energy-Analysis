@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timezone, timedelta
-from flask import Flask, jsonify, render_template, Response
+from flask import Flask, jsonify, render_template, request
 import sys
 import sqlite3
 from zoneinfo import ZoneInfo
@@ -228,8 +228,6 @@ def create_app() -> Flask:
     @app.get("/api/forecast")
     def get_forecast():
         """Fetch forecast prices (live-first) with cache fallback."""
-        from flask import request
-        
         token = os.getenv("AMBER_TOKEN")
         site_id = os.getenv("AMBER_SITE_ID")
         channel_type = "general"
@@ -713,10 +711,147 @@ def create_app() -> Flask:
                 "message": f"Error: {str(e)}"
             })
 
+    @app.get("/api/simulation/status")
+    def get_simulation_status():
+        """Get latest simulation summary for dashboard rendering."""
+        scenario_id = request.args.get("scenario_id", os.getenv("SIM_SCENARIO_ID", "house_twin_10kw_10kwh"))
+        controller_mode = request.args.get("controller", os.getenv("SIM_CONTROLLER", "optimizer"))
+        run_mode = request.args.get("mode", "live")
+
+        cache_path = _get_cache_path()
+        run = sqlite_cache.get_latest_simulation_run(cache_path, scenario_id, controller_mode, run_mode=run_mode)
+        if not run:
+            return jsonify(
+                {
+                    "scenario_id": scenario_id,
+                    "controller_mode": controller_mode,
+                    "run_mode": run_mode,
+                    "status": "missing",
+                    "as_of": None,
+                    "as_of_age_seconds": None,
+                    "is_stale": True,
+                    "stale_reason": "no_cached_simulation_run",
+                    "today_savings_aud": 0.0,
+                    "month_to_date_savings_aud": 0.0,
+                    "next_24h_projected_savings_aud": 0.0,
+                    "current_battery_soc_kwh": 0.0,
+                    "today_solar_generation_kwh": 0.0,
+                    "today_export_revenue_aud": 0.0,
+                    "updated_at": None,
+                }
+            )
+
+        as_of = run.get("as_of")
+        as_of_age_seconds = None
+        if as_of:
+            try:
+                as_of_age_seconds = max(int((datetime.now(timezone.utc) - parse_iso_z(as_of)).total_seconds()), 0)
+            except Exception:
+                as_of_age_seconds = None
+
+        is_stale = bool(run.get("stale", False))
+        if as_of_age_seconds is not None and as_of_age_seconds > 900:
+            is_stale = True
+
+        status = "stale" if is_stale else "ok"
+        payload = {
+            "scenario_id": run["scenario_id"],
+            "controller_mode": run["controller_mode"],
+            "run_mode": run["run_mode"],
+            "status": status,
+            "as_of": as_of,
+            "as_of_age_seconds": as_of_age_seconds,
+            "is_stale": is_stale,
+            "stale_reason": run.get("stale_reason"),
+            "today_savings_aud": run.get("today_savings_aud"),
+            "month_to_date_savings_aud": run.get("mtd_savings_aud"),
+            "next_24h_projected_savings_aud": run.get("next_24h_projected_savings_aud"),
+            "current_battery_soc_kwh": run.get("current_battery_soc_kwh"),
+            "today_solar_generation_kwh": run.get("today_solar_generation_kwh"),
+            "today_export_revenue_aud": run.get("today_export_revenue_aud"),
+            "assumptions": run.get("assumptions"),
+            "updated_at": run.get("updated_at"),
+        }
+
+        response = jsonify(payload)
+        response.headers["X-Data-Source"] = "cache"
+        response.headers["X-Cache-Stale"] = "true" if is_stale else "false"
+        return response
+
+    @app.get("/api/simulation/intervals")
+    def get_simulation_intervals():
+        """Get cached simulation interval rows for charting."""
+        scenario_id = request.args.get("scenario_id", os.getenv("SIM_SCENARIO_ID", "house_twin_10kw_10kwh"))
+        controller_mode = request.args.get("controller", os.getenv("SIM_CONTROLLER", "optimizer"))
+        run_mode = request.args.get("mode", "live")
+        window = request.args.get("window", "today")
+        try:
+            limit = min(max(int(request.args.get("limit", "700")), 1), 5000)
+        except (TypeError, ValueError):
+            limit = 700
+
+        now_utc = datetime.now(timezone.utc)
+        sydney_tz = ZoneInfo("Australia/Sydney")
+        now_sydney = now_utc.astimezone(sydney_tz)
+
+        if window == "mtd":
+            start_sydney = now_sydney.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_utc = now_utc + timedelta(minutes=5)
+            start_utc = start_sydney.astimezone(timezone.utc)
+        elif window == "next24h":
+            start_utc = now_utc
+            end_utc = now_utc + timedelta(hours=24)
+        else:
+            start_sydney = now_sydney.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_sydney = start_sydney + timedelta(days=1)
+            start_utc = start_sydney.astimezone(timezone.utc)
+            end_utc = end_sydney.astimezone(timezone.utc)
+
+        start_iso = start_utc.isoformat().replace("+00:00", "Z")
+        end_iso = end_utc.isoformat().replace("+00:00", "Z")
+
+        cache_path = _get_cache_path()
+        intervals = sqlite_cache.get_simulation_intervals(
+            cache_path,
+            scenario_id,
+            controller_mode,
+            start_iso,
+            end_iso,
+            limit=limit,
+        )
+        run = sqlite_cache.get_latest_simulation_run(cache_path, scenario_id, controller_mode, run_mode=run_mode)
+
+        as_of = run.get("as_of") if run else None
+        stale = bool(run.get("stale", True)) if run else True
+        if as_of:
+            try:
+                stale = stale or (datetime.now(timezone.utc) - parse_iso_z(as_of)).total_seconds() > 900
+            except Exception:
+                stale = True
+
+        return jsonify(
+            {
+                "scenario_id": scenario_id,
+                "controller_mode": controller_mode,
+                "run_mode": run_mode,
+                "window": window,
+                "start": start_iso,
+                "end": end_iso,
+                "as_of": as_of,
+                "is_stale": stale,
+                "intervals": intervals,
+            }
+        )
+
     @app.get("/")
     def index():
         """Home page with kiosk-style dashboard."""
         return render_template("dashboard.html")
+
+    @app.get("/simulation")
+    def simulation():
+        """Simulation dashboard page."""
+        return render_template("simulation.html")
 
     return app
 
