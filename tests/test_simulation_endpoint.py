@@ -119,3 +119,23 @@ def test_simulation_status_and_intervals_endpoints(test_app, temp_db):
     assert intervals_data["controller_mode"] == controller
     assert isinstance(intervals_data["intervals"], list)
     assert len(intervals_data["intervals"]) >= 1
+
+    flow_response = test_app.get("/api/simulation/flow")
+    assert flow_response.status_code == 200
+
+    flow_data = flow_response.get_json()
+    assert flow_data["scenario_id"] == scenario_id
+    assert flow_data["controller_mode"] == controller
+    assert flow_data["status"] == "ok"
+    assert flow_data["is_stale"] is False
+
+    flows_kw = flow_data["flows_kw"]
+    assert flows_kw["solar_to_home"] == pytest.approx(1.8, abs=1e-9)
+    assert flows_kw["battery_to_home"] == pytest.approx(2.4, abs=1e-9)
+    assert flows_kw["grid_to_home"] == pytest.approx(2.4, abs=1e-9)
+    assert flows_kw["grid_to_battery"] == pytest.approx(1.2, abs=1e-9)
+
+    money_hour = flow_data["money_aud_per_hour"]
+    assert "import_cost" in money_hour
+    assert "export_revenue" in money_hour
+    assert "savings_vs_baseline" in money_hour

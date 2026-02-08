@@ -7,11 +7,16 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='simulation.css') }}">
 </head>
 <body>
-  <div class="sim-kiosk">
+  <div class="sim-shell">
     <header class="sim-header">
-      <div class="sim-brand-row">
-        <div class="sim-brand">Digital Twin</div>
-        <span id="sim-mode" class="sim-pill">OPTIMIZER</span>
+      <div class="sim-brand-block">
+        <div class="sim-brand">Home Energy Twin</div>
+        <div class="sim-subbrand">Solar + battery digital scenario</div>
+      </div>
+      <div class="sim-header-pills" role="status" aria-live="polite">
+        <span id="sim-controller" class="chip">OPTIMIZER</span>
+        <span id="sim-freshness" class="chip chip-ok">FRESH</span>
+        <span id="sim-asof-chip" class="chip">As of --</span>
       </div>
       <div class="sim-header-right">
         <nav class="nav-links" aria-label="Main">
@@ -23,50 +28,191 @@
     </header>
 
     <main class="sim-main">
-      <section class="sim-metrics">
-        <article class="sim-card highlight">
-          <h2>Today Savings</h2>
-          <p class="metric-value" id="today-savings">$0.00</p>
-          <p class="metric-sub" id="sim-asof">As of --</p>
+      <section class="flow-stack">
+        <article class="panel flow-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Energy Flow (Current 5-Min Interval)</h2>
+              <p class="panel-sub" id="flow-interval">Interval --</p>
+            </div>
+            <span id="flow-state" class="state-pill">Loading</span>
+          </div>
+
+          <div class="flow-board-wrap">
+            <svg id="energy-flow-svg" viewBox="0 0 900 430" role="img" aria-label="Energy flow diagram">
+              <defs>
+                <linearGradient id="grad-solar" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#48e5a6" />
+                  <stop offset="100%" stop-color="#30b37d" />
+                </linearGradient>
+                <linearGradient id="grad-battery" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#ffbc5f" />
+                  <stop offset="100%" stop-color="#f78d2a" />
+                </linearGradient>
+                <linearGradient id="grad-grid" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#86b8ff" />
+                  <stop offset="100%" stop-color="#4b89f4" />
+                </linearGradient>
+                <filter id="flow-glow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="2" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+
+              <path id="path-solar-home" class="flow-path source-solar" d="M230 84 C305 84, 350 158, 410 176" />
+              <path id="path-solar-battery" class="flow-path source-solar" d="M230 116 C280 140, 280 248, 230 286" />
+              <path id="path-solar-grid" class="flow-path source-solar" d="M232 100 C372 48, 560 56, 680 176" />
+
+              <path id="path-battery-home" class="flow-path source-battery" d="M230 286 C305 286, 350 242, 410 224" />
+              <path id="path-battery-grid" class="flow-path source-battery" d="M232 314 C380 356, 560 322, 680 224" />
+
+              <path id="path-grid-home" class="flow-path source-grid" d="M678 200 C620 200, 590 200, 530 200" />
+              <path id="path-grid-battery" class="flow-path source-grid" d="M680 224 C560 284, 390 346, 230 314" />
+
+              <g id="flow-label-solar-home" class="flow-label" transform="translate(324 114)">
+                <rect x="-52" y="-15" width="104" height="26" rx="8"></rect>
+                <text id="flow-value-solar-home" x="0" y="3" text-anchor="middle">0.0 kW</text>
+              </g>
+              <g id="flow-label-solar-battery" class="flow-label" transform="translate(292 214)">
+                <rect x="-52" y="-15" width="104" height="26" rx="8"></rect>
+                <text id="flow-value-solar-battery" x="0" y="3" text-anchor="middle">0.0 kW</text>
+              </g>
+              <g id="flow-label-solar-grid" class="flow-label" transform="translate(506 90)">
+                <rect x="-52" y="-15" width="104" height="26" rx="8"></rect>
+                <text id="flow-value-solar-grid" x="0" y="3" text-anchor="middle">0.0 kW</text>
+              </g>
+
+              <g id="flow-label-battery-home" class="flow-label" transform="translate(326 266)">
+                <rect x="-52" y="-15" width="104" height="26" rx="8"></rect>
+                <text id="flow-value-battery-home" x="0" y="3" text-anchor="middle">0.0 kW</text>
+              </g>
+              <g id="flow-label-battery-grid" class="flow-label" transform="translate(506 330)">
+                <rect x="-52" y="-15" width="104" height="26" rx="8"></rect>
+                <text id="flow-value-battery-grid" x="0" y="3" text-anchor="middle">0.0 kW</text>
+              </g>
+
+              <g id="flow-label-grid-home" class="flow-label" transform="translate(608 186)">
+                <rect x="-52" y="-15" width="104" height="26" rx="8"></rect>
+                <text id="flow-value-grid-home" x="0" y="3" text-anchor="middle">0.0 kW</text>
+              </g>
+              <g id="flow-label-grid-battery" class="flow-label" transform="translate(500 294)">
+                <rect x="-52" y="-15" width="104" height="26" rx="8"></rect>
+                <text id="flow-value-grid-battery" x="0" y="3" text-anchor="middle">0.0 kW</text>
+              </g>
+
+              <g class="node node-solar" transform="translate(170 100)">
+                <circle r="60"></circle>
+                <text class="node-title" x="0" y="-8" text-anchor="middle">SOLAR</text>
+                <text id="node-solar-value" class="node-value" x="0" y="16" text-anchor="middle">0.0 kW</text>
+              </g>
+              <g class="node node-battery" transform="translate(170 300)">
+                <circle r="60"></circle>
+                <text class="node-title" x="0" y="-8" text-anchor="middle">BATTERY</text>
+                <text id="node-battery-value" class="node-value" x="0" y="16" text-anchor="middle">0.0 kW</text>
+              </g>
+              <g class="node node-home" transform="translate(470 200)">
+                <circle r="66"></circle>
+                <text class="node-title" x="0" y="-8" text-anchor="middle">HOME LOAD</text>
+                <text id="node-home-value" class="node-value" x="0" y="16" text-anchor="middle">0.0 kW</text>
+              </g>
+              <g class="node node-grid" transform="translate(740 200)">
+                <circle r="60"></circle>
+                <text class="node-title" x="0" y="-8" text-anchor="middle">GRID</text>
+                <text id="node-grid-value" class="node-value" x="0" y="16" text-anchor="middle">0.0 kW</text>
+              </g>
+            </svg>
+            <div id="sim-stale-banner" class="stale-banner" hidden>Simulation data is stale</div>
+          </div>
+          <p class="flow-note" id="flow-note">Waiting for cached simulation intervals...</p>
         </article>
-        <article class="sim-card">
-          <h2>MTD Savings</h2>
-          <p class="metric-value" id="mtd-savings">$0.00</p>
-          <p class="metric-sub">Australia/Sydney month window</p>
-        </article>
-        <article class="sim-card">
-          <h2>Battery SoC</h2>
-          <p class="metric-value" id="battery-soc">0.0 kWh</p>
-          <p class="metric-sub" id="sim-status">Status: waiting</p>
-        </article>
-        <article class="sim-card">
-          <h2>Solar Today</h2>
-          <p class="metric-value" id="solar-today">0.0 kWh</p>
-          <p class="metric-sub">10 kW hypothetical PV</p>
-        </article>
-        <article class="sim-card">
-          <h2>Export Revenue</h2>
-          <p class="metric-value" id="export-revenue">$0.00</p>
-          <p class="metric-sub">Estimated from interval exports</p>
-        </article>
-        <article class="sim-card">
-          <h2>Next 24h Savings</h2>
-          <p class="metric-value" id="forecast-savings">$0.00</p>
-          <p class="metric-sub">Price + usage projection</p>
+
+        <article class="panel money-panel">
+          <div class="panel-head compact">
+            <h2>Money Flow (AUD/hour)</h2>
+          </div>
+          <div class="money-grid">
+            <div class="money-card">
+              <span class="money-label">Import cost</span>
+              <span id="money-import" class="money-value">$0.00</span>
+            </div>
+            <div class="money-card">
+              <span class="money-label">Export revenue</span>
+              <span id="money-export" class="money-value">$0.00</span>
+            </div>
+            <div class="money-card">
+              <span class="money-label">Avoided grid cost</span>
+              <span id="money-avoided" class="money-value">$0.00</span>
+            </div>
+            <div class="money-card">
+              <span class="money-label">Battery degradation</span>
+              <span id="money-degradation" class="money-value">$0.00</span>
+            </div>
+            <div class="money-card total">
+              <span class="money-label">Scenario net cost</span>
+              <span id="money-net" class="money-value">$0.00</span>
+            </div>
+            <div class="money-card highlight">
+              <span class="money-label">Savings vs baseline</span>
+              <span id="money-savings" class="money-value">$0.00</span>
+            </div>
+          </div>
         </article>
       </section>
 
-      <section class="sim-chart-card">
-        <div class="chart-head">
-          <h2>Interval Savings (Today)</h2>
-          <span id="chart-state" class="chart-state">Loading...</span>
-        </div>
-        <div id="interval-chart" class="interval-chart" role="img" aria-label="Interval savings chart"></div>
+      <section class="metrics-stack">
+        <article class="panel kpi-panel">
+          <div class="panel-head compact">
+            <h2>Simulation KPIs</h2>
+            <span id="sim-status" class="state-pill">Pending</span>
+          </div>
+          <div class="kpi-grid">
+            <div class="kpi-card accent">
+              <span class="kpi-label">Today savings</span>
+              <span id="today-savings" class="kpi-value">$0.00</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">MTD savings</span>
+              <span id="mtd-savings" class="kpi-value">$0.00</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Battery SoC</span>
+              <span id="battery-soc" class="kpi-value">0.0 kWh</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Solar today</span>
+              <span id="solar-today" class="kpi-value">0.0 kWh</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Export revenue today</span>
+              <span id="export-revenue" class="kpi-value">$0.00</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Next 24h savings</span>
+              <span id="forecast-savings" class="kpi-value">$0.00</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel chart-panel">
+          <div class="panel-head compact">
+            <h2>Today Cost Profile</h2>
+            <span id="chart-state" class="state-pill">Loading</span>
+          </div>
+          <div id="interval-chart" class="interval-chart" role="img" aria-label="Baseline versus scenario cost chart"></div>
+          <div class="chart-legend">
+            <span><i class="swatch baseline"></i>Baseline cost</span>
+            <span><i class="swatch scenario"></i>Scenario cost</span>
+            <span><i class="swatch savings"></i>Savings intervals</span>
+          </div>
+        </article>
       </section>
     </main>
 
     <footer class="sim-footer">
-      <div id="sim-footer-message">Simulation uses cached data when offline.</div>
+      <div id="sim-footer-message">Simulation uses cached data when upstream services are unavailable.</div>
     </footer>
   </div>
 

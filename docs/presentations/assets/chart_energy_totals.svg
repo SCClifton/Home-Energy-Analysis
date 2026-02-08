@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="780" viewBox="0 0 1400 780">
+
+<defs>
+  <style>
+    .axis { fill: none; stroke: #5d7096; stroke-width: 1.3; }
+    .grid { fill: none; stroke: #24324f; stroke-width: 1; }
+    .tick { fill: #9db0d8; font-size: 15px; font-family: Inter,Segoe UI,sans-serif; }
+    .legend { fill: #eaf1ff; font-size: 16px; font-family: Inter,Segoe UI,sans-serif; }
+    .value { fill: #eaf1ff; font-size: 14px; font-family: Inter,Segoe UI,sans-serif; }
+  </style>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb3ff"/>
+  </marker>
+  <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#2ec4b6"/>
+  </marker>
+  <marker id="arrowOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#ff9f43"/>
+  </marker>
+</defs>
+
+<rect x="0" y="0" width="1400" height="780" fill="#0b1020"/>
+<text x="48" y="54" font-size="34" fill="#eaf1ff" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Energy Totals by Controller</text>
+<text x="48" y="88" font-size="20" fill="#9db0d8" font-family="Inter,Segoe UI,sans-serif">kWh totals in backtest window</text>
+<rect x="110" y="140" width="1210" height="540" fill="#101a33" rx="16"/>
+<line class="grid" x1="110" y1="140.0" x2="1320" y2="140.0"/>
+<text class="tick" x="96" y="145.0" text-anchor="end">49.4</text>
+<line class="grid" x1="110" y1="248.0" x2="1320" y2="248.0"/>
+<text class="tick" x="96" y="253.0" text-anchor="end">39.5</text>
+<line class="grid" x1="110" y1="356.0" x2="1320" y2="356.0"/>
+<text class="tick" x="96" y="361.0" text-anchor="end">29.7</text>
+<line class="grid" x1="110" y1="464.0" x2="1320" y2="464.0"/>
+<text class="tick" x="96" y="469.0" text-anchor="end">19.8</text>
+<line class="grid" x1="110" y1="572.0" x2="1320" y2="572.0"/>
+<text class="tick" x="96" y="577.0" text-anchor="end">9.9</text>
+<line class="grid" x1="110" y1="680.0" x2="1320" y2="680.0"/>
+<text class="tick" x="96" y="685.0" text-anchor="end">0.0</text>
+<text class="tick" x="261.2" y="714" text-anchor="middle">Baseline import</text>
+<rect x="170.5" y="298.3" width="84.7" height="381.7" fill="#2ec4b6" rx="4"/>
+<text class="value" x="212.8" y="290.3" text-anchor="middle">34.94</text>
+<rect x="279.4" y="298.3" width="84.7" height="381.7" fill="#ff9f43" rx="4"/>
+<text class="value" x="321.8" y="290.3" text-anchor="middle">34.94</text>
+<text class="tick" x="563.8" y="714" text-anchor="middle">Scenario import</text>
+<rect x="473.0" y="230.0" width="84.7" height="450.0" fill="#2ec4b6" rx="4"/>
+<text class="value" x="515.4" y="222.0" text-anchor="middle">41.19</text>
+<rect x="581.9" y="262.9" width="84.7" height="417.1" fill="#ff9f43" rx="4"/>
+<text class="value" x="624.2" y="254.9" text-anchor="middle">38.18</text>
+<text class="tick" x="866.2" y="714" text-anchor="middle">Battery charge</text>
+<rect x="775.5" y="503.9" width="84.7" height="176.1" fill="#2ec4b6" rx="4"/>
+<text class="value" x="817.9" y="495.9" text-anchor="middle">16.12</text>
+<rect x="884.4" y="644.5" width="84.7" height="35.5" fill="#ff9f43" rx="4"/>
+<text class="value" x="926.8" y="636.5" text-anchor="middle">3.25</text>
+<text class="tick" x="1168.8" y="714" text-anchor="middle">Battery discharge</text>
+<rect x="1078.0" y="572.2" width="84.7" height="107.8" fill="#2ec4b6" rx="4"/>
+<text class="value" x="1120.3" y="564.2" text-anchor="middle">9.87</text>
+<rect x="1186.9" y="679.8" width="84.7" height="0.2" fill="#ff9f43" rx="4"/>
+<text class="value" x="1229.2" y="671.8" text-anchor="middle">0.01</text>
+<rect x="960" y="42" width="340" height="70" fill="#102843" rx="12"/>
+<text class="legend" x="980" y="72">Savings (AUD): optimizer +0.293, rule -0.187</text>
+</svg>

@@ -46,6 +46,19 @@
   * Added richer Pi verification and Mac->GitHub->Pi rollout workflow in `docs/pi_deployment.md`.
 * Local verification:
   * `.venv/bin/python -m pytest -q` → all tests passing (`23 passed`).
+* Upgraded dashboard UX polish and simulation integration:
+  * Main dashboard visual system refreshed for better hierarchy/readability on the 5" display.
+  * Added simulation status + today savings summary in the Data Status card (`dashboard_app/app/templates/dashboard.html`, `dashboard_app/app/static/dashboard.js`).
+* Rebuilt simulation page with Tesla-style energy/money flow visualization:
+  * Added directional flow board with separated connection ports to reduce ambiguous crossings.
+  * Added interval money-flow strip and richer today chart rendering with explicit stale state banner.
+* Extended simulation API integration coverage:
+  * Added `/api/simulation/flow` endpoint integration assertions to `tests/test_simulation_endpoint.py`.
+  * Verification: `.venv/bin/python -m pytest -q tests/test_scenario_engine.py tests/test_simulation_endpoint.py` → `5 passed`.
+* Created professional presentation assets and regenerated PPTX:
+  * New chart renderer and flow mockup generator scripts (`scripts/generate_simulation_presentation_pngs.py`, `scripts/generate_flow_mockup_pngs.py`).
+  * Updated deck source and Keynote export automation (`docs/presentations/digital_twin_simulation_walkthrough_2026-02-08.md`, `scripts/export_simulation_pptx_with_keynote.py`).
+  * Output: `docs/presentations/digital_twin_simulation_walkthrough_2026-02-08.pptx`.
 
 
 ## 2026-01-17
