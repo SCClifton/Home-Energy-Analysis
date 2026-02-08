@@ -10,9 +10,9 @@ The Pi runs as an offline-first appliance using a local SQLite cache. Supabase P
 
 2. **Data pipeline**: Scripts to pull prices and usage from Amber Electric, usage history from Powerpal CSV exports, and load everything into Supabase for analysis.
 
-3. **Modelling (planned)**: Scenario engine to estimate the value of rooftop solar, home batteries, EV charging strategies, and vehicle-to-home (V2H).
+3. **Digital twin simulation**: A backtest/live scenario engine for a hypothetical 10 kW PV + 10 kWh battery with export arbitrage and savings outputs for dashboard display.
 
-## Current status (2026-01-05)
+## Current status (2026-02-08)
 
 ### Working
 
@@ -22,6 +22,11 @@ The Pi runs as an offline-first appliance using a local SQLite cache. Supabase P
 - Supabase forward sync runs daily and is idempotent.
 - Amber prices are backfilled into Supabase from 2024-06-16 to present.
 - Powerpal minute CSV pipeline downloads and loads into Supabase (from 2024-12-30 onward).
+- Digital twin simulation pipeline is available in both backtest and live modes:
+  - Uses Supabase + SQLite cache for historical/live input data.
+  - Uses Open-Meteo irradiance/weather near Vaucluse NSW for PV estimates.
+  - Stores simulation timeseries + summary in SQLite for offline-first dashboard reads.
+- Second dashboard page (`/simulation`) is available with savings, SoC, solar/export metrics, and interval chart data.
 
 ### Known limitations
 
@@ -29,6 +34,7 @@ The Pi runs as an offline-first appliance using a local SQLite cache. Supabase P
 - Amber usage backfill can hit HTTP 429 rate limits (needs throttling and backoff).
 - Powerpal CSV export tokens are short-lived (manual refresh required).
 - `/api/health` may show `status: stale` when the usage cache is old; this does not prevent the UI from loading.
+- Simulation weather ingestion depends on network reachability to Open-Meteo. When unavailable, simulation falls back to cached irradiance rows.
 
 ## Architecture
 
@@ -37,7 +43,8 @@ The Pi runs as an offline-first appliance using a local SQLite cache. Supabase P
 1. Flask dashboard runs locally on `http://127.0.0.1:5050`.
 2. Dashboard reads from a local SQLite cache for resilience.
 3. A systemd timer (if enabled) refreshes the cache from Amber.
-4. Chromium runs in kiosk mode pointing to the local dashboard.
+4. A second 5-minute systemd timer runs live digital twin simulation and writes to SQLite.
+5. Chromium runs in kiosk mode pointing to the local dashboard.
 
 ### Supabase (historical storage)
 
@@ -52,9 +59,9 @@ Supabase stores time-series data for analysis and modelling:
 | Folder | Purpose |
 |--------|---------|
 | `dashboard_app/` | Flask web app (UI and API endpoints) |
-| `scripts/` | Ingestion and backfill scripts (Amber, Powerpal, Supabase loaders) |
+| `scripts/` | Ingestion/backfill/simulation orchestration scripts |
 | `src/home_energy_analysis/storage/` | Storage layer (SQLite cache schema, Supabase schema and connection code) |
-| `analysis/` | Notebooks and analysis utilities |
+| `analysis/` | Scenario engine, notebooks, and analysis utilities |
 | `docs/` | Operational docs (`pi_deployment.md` is the source of truth for Pi setup) |
 | `pi/` | Pi helper scripts (update script, service files) |
 
@@ -89,6 +96,7 @@ POWERPAL_SAMPLE=1
 Runtime environment is stored at `/etc/home-energy-analysis/dashboard.env` (not committed, root-owned). Systemd services load it via `EnvironmentFile=`.
 
 Keys include `AMBER_TOKEN`, `AMBER_SITE_ID`, `SUPABASE_DB_URL`, `PORT`, `SQLITE_PATH`, `RETENTION_DAYS`, `DEBUG`.
+Simulation-specific optional keys: `SIM_CONTROLLER`, `SIM_HISTORY_HOURS`, `SIM_FORECAST_HOURS`, `SIM_REFRESH_WEATHER`.
 
 ## Local development quickstart (Mac)
 
@@ -149,6 +157,49 @@ The dashboard is cache-first. If usage is delayed, cost-related cards can be sta
 - `MONTH TO DATE` is computed from cached `usage.cost_aud` rows only.
 - If usage data is delayed, the UI intentionally shows "reported"/lag wording.
 - If there are no current-month usage rows in cache, MTD may legitimately show `—`.
+- `/simulation` reads only from cached `simulation_runs` and `simulation_intervals` rows for offline-first behavior.
+- Simulation responses always include `as_of` and stale state semantics.
+
+## Digital twin simulation
+
+### What it models
+
+- Baseline: actual consumption + actual interval prices.
+- Scenario: baseline + hypothetical 10 kW PV + 10 kWh battery.
+- Battery controls:
+  - Rule controller (`--controller rule`)
+  - Optimizer-like lookahead controller (`--controller optimizer`) with export arbitrage.
+
+### Default assumptions (explicit)
+
+- PV: `10 kW` nameplate, performance ratio `0.82`, temperature coefficient `-0.004 /°C`.
+- Battery: `10 kWh` capacity, `1 kWh` reserve (10%), `5 kW` charge/discharge caps, round-trip efficiency `90%`.
+- Export limit: `5 kW`.
+- Degradation term: `0.02 AUD/kWh` discharged.
+- Tariff valuation: interval Amber wholesale price applied to both import and export cashflow in this model version.
+
+### Run live mode
+
+```bash
+python scripts/run_simulation_live.py
+```
+
+### Run backtest mode
+
+```bash
+python scripts/run_scenario_simulation.py \
+  --mode backtest \
+  --controller optimizer \
+  --start 2025-01-01T00:00:00Z \
+  --end 2025-02-01T00:00:00Z \
+  --refresh-weather
+```
+
+### Simulation API endpoints
+
+- `GET /api/simulation/status`
+- `GET /api/simulation/intervals?window=today|mtd|next24h`
+- `GET /simulation` (dashboard page)
 
 ## Supabase
 
@@ -232,6 +283,8 @@ Pi systemd services use `/etc/home-energy-analysis/dashboard.env`.
 | Supabase keepalive timer | `home-energy-supabase-keepalive.timer` | Daily keepalive |
 | Supabase forward sync service | `home-energy-supabase-forward-sync.service` | Daily forward sync of prices/usage |
 | Supabase forward sync timer | `home-energy-supabase-forward-sync.timer` | Daily forward sync schedule |
+| Simulation live service | `home-energy-simulation.service` | Runs digital twin live-mode pipeline |
+| Simulation live timer | `home-energy-simulation.timer` | Every 5 minutes |
 | Kiosk script | `~/bin/home-energy-kiosk.sh` | Chromium launcher (waits for `/api/health`, launches fullscreen) |
 | Kiosk user service | `~/.config/systemd/user/home-energy-kiosk.service` | Systemd user unit for kiosk |
 
@@ -242,9 +295,10 @@ sudo systemctl status home-energy-dashboard.service --no-pager -l
 systemctl --user status home-energy-kiosk.service --no-pager -l
 pgrep -a chromium | head -n 1
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/simulation/status | python -m json.tool
 
 # Optional: confirm cache refresh timer exists
-systemctl list-timers --all | grep -E "home-energy-sync-cache" || true
+systemctl list-timers --all | grep -E "home-energy-sync-cache|home-energy-simulation" || true
 ```
 
 ### GitHub -> Pi deployment workflow
@@ -270,6 +324,7 @@ Post-deploy verification:
 ```bash
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
 curl -fsS http://127.0.0.1:5050/api/totals | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/simulation/status | python -m json.tool
 systemctl --user status home-energy-kiosk.service --no-pager -l
 sudo systemctl list-timers --all | grep home-energy
 ```
@@ -305,9 +360,9 @@ Reduce request rate, use smaller chunk sizes, and implement backoff. This is a k
 
 ### P2: Modelling
 
-- Build 2025 baseline (usage + price series).
-- Overlay solar, battery, EV charging, V2H scenarios.
-- Produce ROI/payback outputs.
+- Extend the digital twin model with EV/V2H options and richer tariff structures.
+- Add optimizer improvements (strict optimization formulation).
+- Produce ROI/payback outputs from simulation baselines.
 
 ## Licence
 

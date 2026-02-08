@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timezone, timedelta
-from flask import Flask, jsonify, render_template, Response
+from flask import Flask, jsonify, render_template, request
 import sys
 import sqlite3
 from zoneinfo import ZoneInfo
@@ -228,8 +228,6 @@ def create_app() -> Flask:
     @app.get("/api/forecast")
     def get_forecast():
         """Fetch forecast prices (live-first) with cache fallback."""
-        from flask import request
-        
         token = os.getenv("AMBER_TOKEN")
         site_id = os.getenv("AMBER_SITE_ID")
         channel_type = "general"
@@ -713,10 +711,319 @@ def create_app() -> Flask:
                 "message": f"Error: {str(e)}"
             })
 
+    @app.get("/api/simulation/status")
+    def get_simulation_status():
+        """Get latest simulation summary for dashboard rendering."""
+        scenario_id = request.args.get("scenario_id", os.getenv("SIM_SCENARIO_ID", "house_twin_10kw_10kwh"))
+        controller_mode = request.args.get("controller", os.getenv("SIM_CONTROLLER", "optimizer"))
+        run_mode = request.args.get("mode", "live")
+
+        cache_path = _get_cache_path()
+        run = sqlite_cache.get_latest_simulation_run(cache_path, scenario_id, controller_mode, run_mode=run_mode)
+        if not run:
+            return jsonify(
+                {
+                    "scenario_id": scenario_id,
+                    "controller_mode": controller_mode,
+                    "run_mode": run_mode,
+                    "status": "missing",
+                    "as_of": None,
+                    "as_of_age_seconds": None,
+                    "is_stale": True,
+                    "stale_reason": "no_cached_simulation_run",
+                    "today_savings_aud": 0.0,
+                    "month_to_date_savings_aud": 0.0,
+                    "next_24h_projected_savings_aud": 0.0,
+                    "current_battery_soc_kwh": 0.0,
+                    "today_solar_generation_kwh": 0.0,
+                    "today_export_revenue_aud": 0.0,
+                    "updated_at": None,
+                }
+            )
+
+        as_of = run.get("as_of")
+        as_of_age_seconds = None
+        if as_of:
+            try:
+                as_of_age_seconds = max(int((datetime.now(timezone.utc) - parse_iso_z(as_of)).total_seconds()), 0)
+            except Exception:
+                as_of_age_seconds = None
+
+        is_stale = bool(run.get("stale", False))
+        if as_of_age_seconds is not None and as_of_age_seconds > 900:
+            is_stale = True
+
+        status = "stale" if is_stale else "ok"
+        payload = {
+            "scenario_id": run["scenario_id"],
+            "controller_mode": run["controller_mode"],
+            "run_mode": run["run_mode"],
+            "status": status,
+            "as_of": as_of,
+            "as_of_age_seconds": as_of_age_seconds,
+            "is_stale": is_stale,
+            "stale_reason": run.get("stale_reason"),
+            "today_savings_aud": run.get("today_savings_aud"),
+            "month_to_date_savings_aud": run.get("mtd_savings_aud"),
+            "next_24h_projected_savings_aud": run.get("next_24h_projected_savings_aud"),
+            "current_battery_soc_kwh": run.get("current_battery_soc_kwh"),
+            "today_solar_generation_kwh": run.get("today_solar_generation_kwh"),
+            "today_export_revenue_aud": run.get("today_export_revenue_aud"),
+            "assumptions": run.get("assumptions"),
+            "updated_at": run.get("updated_at"),
+        }
+
+        response = jsonify(payload)
+        response.headers["X-Data-Source"] = "cache"
+        response.headers["X-Cache-Stale"] = "true" if is_stale else "false"
+        return response
+
+    @app.get("/api/simulation/intervals")
+    def get_simulation_intervals():
+        """Get cached simulation interval rows for charting."""
+        scenario_id = request.args.get("scenario_id", os.getenv("SIM_SCENARIO_ID", "house_twin_10kw_10kwh"))
+        controller_mode = request.args.get("controller", os.getenv("SIM_CONTROLLER", "optimizer"))
+        run_mode = request.args.get("mode", "live")
+        window = request.args.get("window", "today")
+        try:
+            limit = min(max(int(request.args.get("limit", "700")), 1), 5000)
+        except (TypeError, ValueError):
+            limit = 700
+
+        now_utc = datetime.now(timezone.utc)
+        sydney_tz = ZoneInfo("Australia/Sydney")
+        now_sydney = now_utc.astimezone(sydney_tz)
+
+        if window == "mtd":
+            start_sydney = now_sydney.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_utc = now_utc + timedelta(minutes=5)
+            start_utc = start_sydney.astimezone(timezone.utc)
+        elif window == "next24h":
+            start_utc = now_utc
+            end_utc = now_utc + timedelta(hours=24)
+        else:
+            start_sydney = now_sydney.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_sydney = start_sydney + timedelta(days=1)
+            start_utc = start_sydney.astimezone(timezone.utc)
+            end_utc = end_sydney.astimezone(timezone.utc)
+
+        start_iso = start_utc.isoformat().replace("+00:00", "Z")
+        end_iso = end_utc.isoformat().replace("+00:00", "Z")
+
+        cache_path = _get_cache_path()
+        intervals = sqlite_cache.get_simulation_intervals(
+            cache_path,
+            scenario_id,
+            controller_mode,
+            start_iso,
+            end_iso,
+            limit=limit,
+        )
+        run = sqlite_cache.get_latest_simulation_run(cache_path, scenario_id, controller_mode, run_mode=run_mode)
+
+        as_of = run.get("as_of") if run else None
+        stale = bool(run.get("stale", True)) if run else True
+        if as_of:
+            try:
+                stale = stale or (datetime.now(timezone.utc) - parse_iso_z(as_of)).total_seconds() > 900
+            except Exception:
+                stale = True
+
+        return jsonify(
+            {
+                "scenario_id": scenario_id,
+                "controller_mode": controller_mode,
+                "run_mode": run_mode,
+                "window": window,
+                "start": start_iso,
+                "end": end_iso,
+                "as_of": as_of,
+                "is_stale": stale,
+                "intervals": intervals,
+            }
+        )
+
+    @app.get("/api/simulation/flow")
+    def get_simulation_flow():
+        """
+        Get latest interval energy and money flow decomposition for Tesla-style flow cards.
+
+        Returns 5-minute interval values (kWh) and per-hour equivalents (kW, AUD/h).
+        """
+        scenario_id = request.args.get("scenario_id", os.getenv("SIM_SCENARIO_ID", "house_twin_10kw_10kwh"))
+        controller_mode = request.args.get("controller", os.getenv("SIM_CONTROLLER", "optimizer"))
+        run_mode = request.args.get("mode", "live")
+
+        cache_path = _get_cache_path()
+        run = sqlite_cache.get_latest_simulation_run(cache_path, scenario_id, controller_mode, run_mode=run_mode)
+        if not run or not run.get("as_of"):
+            return jsonify(
+                {
+                    "scenario_id": scenario_id,
+                    "controller_mode": controller_mode,
+                    "run_mode": run_mode,
+                    "status": "missing",
+                    "as_of": None,
+                    "is_stale": True,
+                    "interval_start": None,
+                    "interval_end": None,
+                    "flows_kwh": {},
+                    "flows_kw": {},
+                    "money_aud_per_interval": {},
+                    "money_aud_per_hour": {},
+                }
+            )
+
+        try:
+            as_of_dt = parse_iso_z(run["as_of"])
+        except Exception:
+            as_of_dt = datetime.now(timezone.utc)
+
+        start_dt = as_of_dt - timedelta(hours=6)
+        end_dt = as_of_dt + timedelta(minutes=10)
+        start_iso = start_dt.isoformat().replace("+00:00", "Z")
+        end_iso = end_dt.isoformat().replace("+00:00", "Z")
+
+        intervals = sqlite_cache.get_simulation_intervals(
+            cache_path,
+            scenario_id,
+            controller_mode,
+            start_iso,
+            end_iso,
+            limit=5000,
+        )
+
+        selected = None
+        latest_start = None
+        for row in intervals:
+            try:
+                ts = parse_iso_z(row["interval_start"])
+            except Exception:
+                continue
+            if ts <= as_of_dt and (latest_start is None or ts > latest_start):
+                latest_start = ts
+                selected = row
+
+        if selected is None and intervals:
+            selected = intervals[-1]
+
+        if not selected:
+            return jsonify(
+                {
+                    "scenario_id": scenario_id,
+                    "controller_mode": controller_mode,
+                    "run_mode": run_mode,
+                    "status": "missing",
+                    "as_of": run.get("as_of"),
+                    "is_stale": True,
+                    "interval_start": None,
+                    "interval_end": None,
+                    "flows_kwh": {},
+                    "flows_kw": {},
+                    "money_aud_per_interval": {},
+                    "money_aud_per_hour": {},
+                }
+            )
+
+        baseline_import = max(float(selected.get("baseline_import_kwh") or 0.0), 0.0)
+        scenario_import = max(float(selected.get("scenario_import_kwh") or 0.0), 0.0)
+        battery_charge = max(float(selected.get("battery_charge_kwh") or 0.0), 0.0)
+        battery_discharge = max(float(selected.get("battery_discharge_kwh") or 0.0), 0.0)
+        export_kwh = max(float(selected.get("export_kwh") or 0.0), 0.0)
+        pv_generation = max(float(selected.get("pv_generation_kwh") or 0.0), 0.0)
+        baseline_cost = float(selected.get("baseline_cost_aud") or 0.0)
+        scenario_cost = float(selected.get("scenario_cost_aud") or 0.0)
+
+        # Load is represented by baseline import in this model implementation.
+        load_kwh = baseline_import
+
+        # Infer price from baseline row. Fallback to 0 if unavailable.
+        inferred_price_aud_per_kwh = 0.0
+        if baseline_import > 1e-9:
+            inferred_price_aud_per_kwh = baseline_cost / baseline_import
+
+        # Decompose interval flows for a clearer directional flow UI.
+        solar_to_home = min(pv_generation, load_kwh)
+        remaining_load = max(load_kwh - solar_to_home, 0.0)
+        solar_surplus = max(pv_generation - solar_to_home, 0.0)
+
+        solar_to_battery = min(battery_charge, solar_surplus)
+        grid_to_battery = max(battery_charge - solar_to_battery, 0.0)
+
+        battery_to_home = min(battery_discharge, remaining_load)
+        battery_to_grid = max(battery_discharge - battery_to_home, 0.0)
+
+        grid_to_home = max(scenario_import - grid_to_battery, 0.0)
+        solar_to_grid = max(export_kwh - battery_to_grid, 0.0)
+
+        flows_kwh = {
+            "solar_to_home": solar_to_home,
+            "solar_to_battery": solar_to_battery,
+            "solar_to_grid": solar_to_grid,
+            "battery_to_home": battery_to_home,
+            "battery_to_grid": battery_to_grid,
+            "grid_to_home": grid_to_home,
+            "grid_to_battery": grid_to_battery,
+        }
+        flows_kw = {k: v * 12.0 for k, v in flows_kwh.items()}
+
+        import_cost = (grid_to_home + grid_to_battery) * inferred_price_aud_per_kwh
+        export_revenue = export_kwh * inferred_price_aud_per_kwh
+        degradation_cost = scenario_cost - (scenario_import * inferred_price_aud_per_kwh - export_kwh * inferred_price_aud_per_kwh)
+        degradation_cost = max(degradation_cost, 0.0)
+        net_cost = import_cost - export_revenue + degradation_cost
+        savings_vs_baseline = baseline_cost - scenario_cost
+        avoided_grid_cost = max((load_kwh - grid_to_home) * inferred_price_aud_per_kwh, 0.0)
+
+        money_interval = {
+            "import_cost": import_cost,
+            "export_revenue": export_revenue,
+            "degradation_cost": degradation_cost,
+            "net_cost": net_cost,
+            "savings_vs_baseline": savings_vs_baseline,
+            "avoided_grid_cost": avoided_grid_cost,
+            "price_aud_per_kwh": inferred_price_aud_per_kwh,
+        }
+        money_hour = {k: v * 12.0 for k, v in money_interval.items() if k != "price_aud_per_kwh"}
+
+        as_of_age_seconds = None
+        if run.get("as_of"):
+            try:
+                as_of_age_seconds = max(int((datetime.now(timezone.utc) - parse_iso_z(run["as_of"])).total_seconds()), 0)
+            except Exception:
+                as_of_age_seconds = None
+
+        is_stale = bool(run.get("stale", False))
+        if as_of_age_seconds is not None and as_of_age_seconds > 900:
+            is_stale = True
+
+        return jsonify(
+            {
+                "scenario_id": scenario_id,
+                "controller_mode": controller_mode,
+                "run_mode": run_mode,
+                "status": "stale" if is_stale else "ok",
+                "as_of": run.get("as_of"),
+                "as_of_age_seconds": as_of_age_seconds,
+                "is_stale": is_stale,
+                "interval_start": selected.get("interval_start"),
+                "interval_end": selected.get("interval_end"),
+                "flows_kwh": flows_kwh,
+                "flows_kw": flows_kw,
+                "money_aud_per_interval": money_interval,
+                "money_aud_per_hour": money_hour,
+            }
+        )
+
     @app.get("/")
     def index():
         """Home page with kiosk-style dashboard."""
         return render_template("dashboard.html")
+
+    @app.get("/simulation")
+    def simulation():
+        """Simulation dashboard page."""
+        return render_template("simulation.html")
 
     return app
 

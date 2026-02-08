@@ -67,6 +67,7 @@ Used by these systemd services via `EnvironmentFile=`:
 - `home-energy-dashboard.service`
 - `home-energy-supabase-forward-sync.service`
 - `home-energy-supabase-keepalive.service`
+- `home-energy-simulation.service`
 
 Keys:
 
@@ -76,6 +77,7 @@ Keys:
 - `PORT` (5050)
 - `RETENTION_DAYS`
 - `SQLITE_PATH` (typically under `/var/lib/home-energy-analysis`) and other runtime flags used by the dashboard and cache logic
+- Optional simulation knobs: `SIM_CONTROLLER`, `SIM_HISTORY_HOURS`, `SIM_FORECAST_HOURS`, `SIM_REFRESH_WEATHER`
 
 Example (no real secrets):
 
@@ -221,14 +223,45 @@ Run now:
 sudo systemctl start home-energy-supabase-forward-sync.service
 ```
 
+### 5) Simulation live refresh (system-level)
+
+Runs the digital twin simulation every 5 minutes and persists summary + interval rows in SQLite for the `/simulation` page and simulation APIs.
+
+Uses `EnvironmentFile=/etc/home-energy-analysis/dashboard.env`.
+
+Install:
+
+```bash
+sudo cp ~/repos/Home-Energy-Analysis/pi/systemd/home-energy-simulation.service /etc/systemd/system/
+sudo cp ~/repos/Home-Energy-Analysis/pi/systemd/home-energy-simulation.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now home-energy-simulation.timer
+```
+
+Check logs:
+
+```bash
+sudo systemctl status home-energy-simulation.service --no-pager -l
+sudo systemctl status home-energy-simulation.timer --no-pager -l
+journalctl -u home-energy-simulation.service -n 50 --no-pager
+```
+
+Run now:
+
+```bash
+sudo systemctl start home-energy-simulation.service
+```
+
 ## Verify it's working
 
 ```bash
 sudo systemctl status home-energy-dashboard.service --no-pager -l
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/simulation/status | python -m json.tool
 sudo systemctl list-timers --all | grep home-energy
 journalctl -u home-energy-supabase-forward-sync.service -n 80 --no-pager
 journalctl -u home-energy-supabase-keepalive.service -n 50 --no-pager
+journalctl -u home-energy-simulation.service -n 50 --no-pager
 ```
 
 Dashboard endpoint checks (recommended after updates):
@@ -237,6 +270,8 @@ Dashboard endpoint checks (recommended after updates):
 curl -fsS http://127.0.0.1:5050/api/price | python -m json.tool
 curl -fsS http://127.0.0.1:5050/api/forecast?hours=3 | python -m json.tool
 curl -fsS http://127.0.0.1:5050/api/totals | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/simulation/status | python -m json.tool
+curl -fsS "http://127.0.0.1:5050/api/simulation/intervals?window=today" | python -m json.tool
 ```
 
 Interpretation notes:

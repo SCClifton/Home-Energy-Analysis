@@ -1,6 +1,7 @@
 """
 SQLite cache for Amber API price and usage data.
 """
+import json
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -462,6 +463,334 @@ def get_forecast_intervals(db_path: str, site_id: str, channel_type: str = "gene
         conn.close()
 
 
+def upsert_irradiance(db_path: str, rows: List[Dict[str, Any]]) -> None:
+    """
+    Insert or update irradiance rows.
+
+    Args:
+        db_path: Path to SQLite database.
+        rows: List of dictionaries with keys:
+            location_id, interval_start, interval_end, ghi_wm2 and optional
+            temperature_c, cloud_cover_pct, source.
+    """
+    if not rows:
+        return
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        updated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        for row in rows:
+            cursor.execute(
+                """
+                INSERT INTO irradiance (
+                    location_id, interval_start, interval_end, ghi_wm2,
+                    temperature_c, cloud_cover_pct, source, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (location_id, interval_start)
+                DO UPDATE SET
+                    interval_end = excluded.interval_end,
+                    ghi_wm2 = excluded.ghi_wm2,
+                    temperature_c = excluded.temperature_c,
+                    cloud_cover_pct = excluded.cloud_cover_pct,
+                    source = excluded.source,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    row["location_id"],
+                    row["interval_start"],
+                    row["interval_end"],
+                    row["ghi_wm2"],
+                    row.get("temperature_c"),
+                    row.get("cloud_cover_pct"),
+                    row.get("source", "open-meteo"),
+                    updated_at,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_irradiance_range(
+    db_path: str,
+    location_id: str,
+    start_interval: str,
+    end_interval: str,
+) -> List[Dict[str, Any]]:
+    """
+    Get irradiance rows in [start_interval, end_interval).
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                location_id, interval_start, interval_end, ghi_wm2,
+                temperature_c, cloud_cover_pct, source, updated_at
+            FROM irradiance
+            WHERE location_id = ? AND interval_start >= ? AND interval_start < ?
+            ORDER BY interval_start ASC
+            """,
+            (location_id, start_interval, end_interval),
+        )
+        rows = cursor.fetchall()
+        return [
+            {
+                "location_id": row[0],
+                "interval_start": row[1],
+                "interval_end": row[2],
+                "ghi_wm2": row[3],
+                "temperature_c": row[4],
+                "cloud_cover_pct": row[5],
+                "source": row[6],
+                "updated_at": row[7],
+            }
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+
+def upsert_simulation_intervals(db_path: str, rows: List[Dict[str, Any]]) -> None:
+    """
+    Insert or update simulation interval rows.
+    """
+    if not rows:
+        return
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        updated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        for row in rows:
+            cursor.execute(
+                """
+                INSERT INTO simulation_intervals (
+                    scenario_id, controller_mode, interval_start, interval_end,
+                    baseline_import_kwh, scenario_import_kwh, battery_charge_kwh,
+                    battery_discharge_kwh, battery_soc_kwh, pv_generation_kwh,
+                    export_kwh, baseline_cost_aud, scenario_cost_aud, savings_aud,
+                    forecast, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (scenario_id, controller_mode, interval_start)
+                DO UPDATE SET
+                    interval_end = excluded.interval_end,
+                    baseline_import_kwh = excluded.baseline_import_kwh,
+                    scenario_import_kwh = excluded.scenario_import_kwh,
+                    battery_charge_kwh = excluded.battery_charge_kwh,
+                    battery_discharge_kwh = excluded.battery_discharge_kwh,
+                    battery_soc_kwh = excluded.battery_soc_kwh,
+                    pv_generation_kwh = excluded.pv_generation_kwh,
+                    export_kwh = excluded.export_kwh,
+                    baseline_cost_aud = excluded.baseline_cost_aud,
+                    scenario_cost_aud = excluded.scenario_cost_aud,
+                    savings_aud = excluded.savings_aud,
+                    forecast = excluded.forecast,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    row["scenario_id"],
+                    row["controller_mode"],
+                    row["interval_start"],
+                    row["interval_end"],
+                    row["baseline_import_kwh"],
+                    row["scenario_import_kwh"],
+                    row["battery_charge_kwh"],
+                    row["battery_discharge_kwh"],
+                    row["battery_soc_kwh"],
+                    row["pv_generation_kwh"],
+                    row["export_kwh"],
+                    row["baseline_cost_aud"],
+                    row["scenario_cost_aud"],
+                    row["savings_aud"],
+                    1 if row.get("forecast", False) else 0,
+                    updated_at,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_simulation_intervals(
+    db_path: str,
+    scenario_id: str,
+    controller_mode: str,
+    start_interval: str,
+    end_interval: str,
+    limit: int = 5000,
+) -> List[Dict[str, Any]]:
+    """
+    Get simulation intervals in [start_interval, end_interval), sorted by interval_start.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                scenario_id, controller_mode, interval_start, interval_end,
+                baseline_import_kwh, scenario_import_kwh, battery_charge_kwh,
+                battery_discharge_kwh, battery_soc_kwh, pv_generation_kwh,
+                export_kwh, baseline_cost_aud, scenario_cost_aud, savings_aud,
+                forecast, updated_at
+            FROM simulation_intervals
+            WHERE scenario_id = ?
+              AND controller_mode = ?
+              AND interval_start >= ?
+              AND interval_start < ?
+            ORDER BY interval_start ASC
+            LIMIT ?
+            """,
+            (scenario_id, controller_mode, start_interval, end_interval, limit),
+        )
+        rows = cursor.fetchall()
+        return [
+            {
+                "scenario_id": row[0],
+                "controller_mode": row[1],
+                "interval_start": row[2],
+                "interval_end": row[3],
+                "baseline_import_kwh": row[4],
+                "scenario_import_kwh": row[5],
+                "battery_charge_kwh": row[6],
+                "battery_discharge_kwh": row[7],
+                "battery_soc_kwh": row[8],
+                "pv_generation_kwh": row[9],
+                "export_kwh": row[10],
+                "baseline_cost_aud": row[11],
+                "scenario_cost_aud": row[12],
+                "savings_aud": row[13],
+                "forecast": bool(row[14]),
+                "updated_at": row[15],
+            }
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+
+def upsert_simulation_run(db_path: str, run_row: Dict[str, Any]) -> None:
+    """
+    Upsert latest simulation summary row for a scenario/controller/mode.
+    """
+    assumptions_json = run_row.get("assumptions_json")
+    if assumptions_json is not None and not isinstance(assumptions_json, str):
+        assumptions_json = json.dumps(assumptions_json, sort_keys=True)
+
+    updated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO simulation_runs (
+                scenario_id, controller_mode, run_mode,
+                as_of, window_start, window_end,
+                today_savings_aud, mtd_savings_aud, next_24h_projected_savings_aud,
+                current_battery_soc_kwh, today_solar_generation_kwh, today_export_revenue_aud,
+                stale, stale_reason, assumptions_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (scenario_id, controller_mode, run_mode)
+            DO UPDATE SET
+                as_of = excluded.as_of,
+                window_start = excluded.window_start,
+                window_end = excluded.window_end,
+                today_savings_aud = excluded.today_savings_aud,
+                mtd_savings_aud = excluded.mtd_savings_aud,
+                next_24h_projected_savings_aud = excluded.next_24h_projected_savings_aud,
+                current_battery_soc_kwh = excluded.current_battery_soc_kwh,
+                today_solar_generation_kwh = excluded.today_solar_generation_kwh,
+                today_export_revenue_aud = excluded.today_export_revenue_aud,
+                stale = excluded.stale,
+                stale_reason = excluded.stale_reason,
+                assumptions_json = excluded.assumptions_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                run_row["scenario_id"],
+                run_row["controller_mode"],
+                run_row["run_mode"],
+                run_row["as_of"],
+                run_row["window_start"],
+                run_row["window_end"],
+                run_row["today_savings_aud"],
+                run_row["mtd_savings_aud"],
+                run_row["next_24h_projected_savings_aud"],
+                run_row["current_battery_soc_kwh"],
+                run_row["today_solar_generation_kwh"],
+                run_row["today_export_revenue_aud"],
+                1 if run_row.get("stale", False) else 0,
+                run_row.get("stale_reason"),
+                assumptions_json,
+                updated_at,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_latest_simulation_run(
+    db_path: str,
+    scenario_id: str,
+    controller_mode: str,
+    run_mode: str = "live",
+) -> Optional[Dict[str, Any]]:
+    """
+    Fetch latest simulation summary row for scenario/controller/mode.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                scenario_id, controller_mode, run_mode,
+                as_of, window_start, window_end,
+                today_savings_aud, mtd_savings_aud, next_24h_projected_savings_aud,
+                current_battery_soc_kwh, today_solar_generation_kwh, today_export_revenue_aud,
+                stale, stale_reason, assumptions_json, updated_at
+            FROM simulation_runs
+            WHERE scenario_id = ?
+              AND controller_mode = ?
+              AND run_mode = ?
+            LIMIT 1
+            """,
+            (scenario_id, controller_mode, run_mode),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        assumptions = row[14]
+        try:
+            assumptions = json.loads(assumptions) if assumptions else None
+        except json.JSONDecodeError:
+            assumptions = assumptions
+        return {
+            "scenario_id": row[0],
+            "controller_mode": row[1],
+            "run_mode": row[2],
+            "as_of": row[3],
+            "window_start": row[4],
+            "window_end": row[5],
+            "today_savings_aud": row[6],
+            "mtd_savings_aud": row[7],
+            "next_24h_projected_savings_aud": row[8],
+            "current_battery_soc_kwh": row[9],
+            "today_solar_generation_kwh": row[10],
+            "today_export_revenue_aud": row[11],
+            "stale": bool(row[12]),
+            "stale_reason": row[13],
+            "assumptions": assumptions,
+            "updated_at": row[15],
+        }
+    finally:
+        conn.close()
+
+
 def prune_old_data(db_path: str, retention_days: int) -> int:
     """
     Delete rows older than the retention period.
@@ -498,4 +827,3 @@ def prune_old_data(db_path: str, retention_days: int) -> int:
         return prices_deleted + usage_deleted
     finally:
         conn.close()
-

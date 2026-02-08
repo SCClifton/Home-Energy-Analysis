@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="780" viewBox="0 0 1400 780">
+
+<defs>
+  <style>
+    .axis { fill: none; stroke: #5d7096; stroke-width: 1.3; }
+    .grid { fill: none; stroke: #24324f; stroke-width: 1; }
+    .tick { fill: #9db0d8; font-size: 15px; font-family: Inter,Segoe UI,sans-serif; }
+    .legend { fill: #eaf1ff; font-size: 16px; font-family: Inter,Segoe UI,sans-serif; }
+    .value { fill: #eaf1ff; font-size: 14px; font-family: Inter,Segoe UI,sans-serif; }
+  </style>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb3ff"/>
+  </marker>
+  <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#2ec4b6"/>
+  </marker>
+  <marker id="arrowOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#ff9f43"/>
+  </marker>
+</defs>
+
+<rect x="0" y="0" width="1400" height="780" fill="#0b1020"/>
+<text x="48" y="54" font-size="34" fill="#eaf1ff" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Daily Savings by Controller</text>
+<text x="48" y="88" font-size="20" fill="#9db0d8" font-family="Inter,Segoe UI,sans-serif">Sydney-local days, backtest window 2025-12-28 to 2025-12-31 UTC</text>
+<rect x="110" y="140" width="1210" height="540" fill="#101a33" rx="16"/>
+<line class="grid" x1="110" y1="140.0" x2="1320" y2="140.0"/>
+<text class="tick" x="96" y="145.0" text-anchor="end">+0.43</text>
+<line class="grid" x1="110" y1="248.0" x2="1320" y2="248.0"/>
+<text class="tick" x="96" y="253.0" text-anchor="end">+0.26</text>
+<line class="grid" x1="110" y1="356.0" x2="1320" y2="356.0"/>
+<text class="tick" x="96" y="361.0" text-anchor="end">+0.09</text>
+<line class="grid" x1="110" y1="464.0" x2="1320" y2="464.0"/>
+<text class="tick" x="96" y="469.0" text-anchor="end">-0.08</text>
+<line class="grid" x1="110" y1="572.0" x2="1320" y2="572.0"/>
+<text class="tick" x="96" y="577.0" text-anchor="end">-0.25</text>
+<line class="grid" x1="110" y1="680.0" x2="1320" y2="680.0"/>
+<text class="tick" x="96" y="685.0" text-anchor="end">-0.43</text>
+<line x1="110" y1="412.0" x2="1320" y2="412.0" stroke="#8ba3d8" stroke-width="1.6"/>
+<text class="tick" x="261.2" y="714" text-anchor="middle">2025-12-28</text>
+<rect x="170.5" y="202.3" width="84.7" height="209.7" fill="#2ec4b6" rx="4"/>
+<text class="value" x="212.8" y="194.3" text-anchor="middle">+0.333</text>
+<rect x="279.4" y="412.0" width="84.7" height="0.0" fill="#ff9f43" rx="4"/>
+<text class="value" x="321.8" y="404.0" text-anchor="middle">+0.000</text>
+<text class="tick" x="563.8" y="714" text-anchor="middle">2025-12-29</text>
+<rect x="473.0" y="412.0" width="84.7" height="205.7" fill="#2ec4b6" rx="4"/>
+<text class="value" x="515.4" y="635.7" text-anchor="middle">-0.326</text>
+<rect x="581.9" y="412.0" width="84.7" height="119.9" fill="#ff9f43" rx="4"/>
+<text class="value" x="624.2" y="549.9" text-anchor="middle">-0.190</text>
+<text class="tick" x="866.2" y="714" text-anchor="middle">2025-12-30</text>
+<rect x="775.5" y="292.4" width="84.7" height="119.6" fill="#2ec4b6" rx="4"/>
+<text class="value" x="817.9" y="284.4" text-anchor="middle">+0.190</text>
+<rect x="884.4" y="412.0" width="84.7" height="0.0" fill="#ff9f43" rx="4"/>
+<text class="value" x="926.8" y="404.0" text-anchor="middle">+0.000</text>
+<text class="tick" x="1168.8" y="714" text-anchor="middle">2025-12-31</text>
+<rect x="1078.0" y="350.9" width="84.7" height="61.1" fill="#2ec4b6" rx="4"/>
+<text class="value" x="1120.3" y="342.9" text-anchor="middle">+0.097</text>
+<rect x="1186.9" y="410.2" width="84.7" height="1.9" fill="#ff9f43" rx="4"/>
+<text class="value" x="1229.2" y="402.2" text-anchor="middle">+0.003</text>
+<rect x="1090" y="176" width="16" height="16" fill="#2ec4b6" rx="3"/>
+<text class="legend" x="1114" y="189">Optimizer</text>
+<rect x="1090" y="204" width="16" height="16" fill="#ff9f43" rx="3"/>
+<text class="legend" x="1114" y="217">Rule</text>
+</svg>

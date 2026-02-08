@@ -118,6 +118,38 @@ function getUsageStatus(ageSeconds) {
     return { text: "Very stale", class: "very-stale" };
 }
 
+function getSimulationStatus(simData) {
+    if (!simData || simData.status === "missing") {
+        return {
+            text: "Missing",
+            class: "very-stale",
+            note: "Twin savings: no simulation run"
+        };
+    }
+
+    if (simData.is_stale) {
+        const ageSeconds = simData.as_of_age_seconds;
+        if (ageSeconds !== null && ageSeconds !== undefined) {
+            return {
+                text: "Stale",
+                class: "stale",
+                note: `Twin savings today: $${(simData.today_savings_aud || 0).toFixed(2)} (${formatLag(ageSeconds)} old)`
+            };
+        }
+        return {
+            text: "Stale",
+            class: "stale",
+            note: `Twin savings today: $${(simData.today_savings_aud || 0).toFixed(2)}`
+        };
+    }
+
+    return {
+        text: "Fresh",
+        class: "fresh",
+        note: `Twin savings today: $${(simData.today_savings_aud || 0).toFixed(2)}`
+    };
+}
+
 // Update clock
 function updateClock() {
     const clockEl = document.getElementById('clock');
@@ -352,10 +384,22 @@ function updateUI() {
         }).catch(() => ({ data: null, dataSource: null })),
         fetch('/api/health').then(r => r.ok ? r.json() : null).catch(() => null),
         fetch('/api/totals').then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch('/api/forecast?hours=3').then(r => r.ok ? r.json() : null).catch(() => null)
-    ]).then(([priceResponse, healthData, totalsData, forecastData]) => {
+        fetch('/api/forecast?hours=3').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/simulation/status').then(r => r.ok ? r.json() : null).catch(() => null)
+    ]).then(([priceResponse, healthData, totalsData, forecastData, simulationData]) => {
         const priceData = priceResponse.data;
         const priceDataSource = priceResponse.dataSource;
+
+        const simulationStatus = getSimulationStatus(simulationData);
+        const simulationStatusEl = document.getElementById('simulation-status');
+        if (simulationStatusEl) {
+            simulationStatusEl.textContent = simulationStatus.text;
+            simulationStatusEl.className = `status-pill ${simulationStatus.class}`;
+        }
+        const simulationNoteEl = document.getElementById('simulation-note');
+        if (simulationNoteEl) {
+            simulationNoteEl.textContent = simulationStatus.note;
+        }
         
         // Update mode pill based on /api/price X-Data-Source header
         const modePill = document.getElementById('mode-pill');
@@ -386,7 +430,11 @@ function updateUI() {
             document.getElementById('mtd-note').textContent = 'Based on reported usage intervals';
             document.getElementById('mtd-title').textContent = 'MONTH TO DATE';
             document.querySelector('.mtd-card')?.classList.remove('is-delayed');
-            document.getElementById('footer-message').textContent = 'Waiting for cached data';
+            if (simulationData && simulationData.status !== "missing") {
+                document.getElementById('footer-message').textContent = `Waiting for price cache • Simulation savings today $${(simulationData.today_savings_aud || 0).toFixed(2)}`;
+            } else {
+                document.getElementById('footer-message').textContent = 'Waiting for cached data';
+            }
             return;
         }
         
@@ -496,7 +544,11 @@ function updateUI() {
         
         // Update footer message
         const footerMessage = getFooterMessageWithFreshness(priceLevel.level, intervalLabel, priceAgeSeconds);
-        document.getElementById('footer-message').textContent = footerMessage;
+        if (simulationData && simulationData.status !== "missing") {
+            document.getElementById('footer-message').textContent = `${footerMessage} • Twin today ${simulationData.today_savings_aud >= 0 ? "+" : ""}$${(simulationData.today_savings_aud || 0).toFixed(2)}`;
+        } else {
+            document.getElementById('footer-message').textContent = footerMessage;
+        }
         
         // Update forecast
         if (forecastData && forecastData.intervals) {

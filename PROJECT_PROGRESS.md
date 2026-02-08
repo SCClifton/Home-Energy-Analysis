@@ -2,6 +2,32 @@
 
 ## 2026-02-08
 
+### Digital twin simulation (10 kW PV + 10 kWh battery)
+
+* Implemented scenario modelling package under `analysis/src/scenario/`:
+  * PV generation model driven by real irradiance/weather (Open-Meteo, Vaucluse NSW coordinates).
+  * Battery SoC model with power caps, reserve floor, round-trip efficiency, and optional degradation cost.
+  * Two dispatch modes: `rule` and `optimizer` (lookahead/value-maximizing heuristic with export arbitrage).
+* Added orchestrator scripts:
+  * `scripts/run_scenario_simulation.py` for `backtest` and `live` modes.
+  * `scripts/run_simulation_live.py` wrapper for timer-driven 5-minute runs.
+* Extended SQLite cache schema and storage helpers:
+  * New tables: `irradiance`, `simulation_intervals`, `simulation_runs`.
+  * Idempotent upserts/reads for simulation summary + interval chart data.
+* Added simulation APIs + second dashboard page:
+  * `GET /api/simulation/status`
+  * `GET /api/simulation/intervals`
+  * `GET /simulation`
+  * New assets: `simulation.html`, `simulation.js`, `simulation.css`.
+* Added Raspberry Pi timer artifacts for live simulation refresh:
+  * `pi/systemd/home-energy-simulation.service`
+  * `pi/systemd/home-energy-simulation.timer`
+* Test coverage added:
+  * `tests/test_scenario_engine.py` (SoC constraints, dispatch validity, cost calculations, Sydney window logic).
+  * `tests/test_simulation_endpoint.py` (simulation status/interval endpoint integration).
+* Verification:
+  * `.venv/bin/python -m pytest -q` -> `28 passed`.
+
 * Restored missing Supabase keepalive artifacts in-repo:
   * Implemented `scripts/supabase_keepalive.py` (connect + `SELECT NOW()` probe with clear logging).
   * Added systemd units `pi/systemd/home-energy-supabase-keepalive.service` and `pi/systemd/home-energy-supabase-keepalive.timer`.
@@ -20,6 +46,19 @@
   * Added richer Pi verification and Mac->GitHub->Pi rollout workflow in `docs/pi_deployment.md`.
 * Local verification:
   * `.venv/bin/python -m pytest -q` → all tests passing (`23 passed`).
+* Upgraded dashboard UX polish and simulation integration:
+  * Main dashboard visual system refreshed for better hierarchy/readability on the 5" display.
+  * Added simulation status + today savings summary in the Data Status card (`dashboard_app/app/templates/dashboard.html`, `dashboard_app/app/static/dashboard.js`).
+* Rebuilt simulation page with Tesla-style energy/money flow visualization:
+  * Added directional flow board with separated connection ports to reduce ambiguous crossings.
+  * Added interval money-flow strip and richer today chart rendering with explicit stale state banner.
+* Extended simulation API integration coverage:
+  * Added `/api/simulation/flow` endpoint integration assertions to `tests/test_simulation_endpoint.py`.
+  * Verification: `.venv/bin/python -m pytest -q tests/test_scenario_engine.py tests/test_simulation_endpoint.py` → `5 passed`.
+* Created professional presentation assets and regenerated PPTX:
+  * New chart renderer and flow mockup generator scripts (`scripts/generate_simulation_presentation_pngs.py`, `scripts/generate_flow_mockup_pngs.py`).
+  * Updated deck source and Keynote export automation (`docs/presentations/digital_twin_simulation_walkthrough_2026-02-08.md`, `scripts/export_simulation_pptx_with_keynote.py`).
+  * Output: `docs/presentations/digital_twin_simulation_walkthrough_2026-02-08.pptx`.
 
 
 ## 2026-01-17

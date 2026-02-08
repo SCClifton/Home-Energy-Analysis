@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="780" viewBox="0 0 1400 780">
+
+<defs>
+  <style>
+    .axis { fill: none; stroke: #5d7096; stroke-width: 1.3; }
+    .grid { fill: none; stroke: #24324f; stroke-width: 1; }
+    .tick { fill: #9db0d8; font-size: 15px; font-family: Inter,Segoe UI,sans-serif; }
+    .legend { fill: #eaf1ff; font-size: 16px; font-family: Inter,Segoe UI,sans-serif; }
+    .value { fill: #eaf1ff; font-size: 14px; font-family: Inter,Segoe UI,sans-serif; }
+  </style>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb3ff"/>
+  </marker>
+  <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#2ec4b6"/>
+  </marker>
+  <marker id="arrowOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#ff9f43"/>
+  </marker>
+</defs>
+
+<rect x="0" y="0" width="1400" height="780" fill="#0b1020"/>
+<rect x="70" y="40" width="1260" height="700" fill="#0f172a" rx="40" stroke="#1f2b44" stroke-width="3"/>
+<rect x="100" y="90" width="1200" height="460" fill="#111d37" rx="28"/>
+<text x="130" y="138" font-size="36" fill="#eaf1ff" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Overnight: Grid Charging</text>
+<text x="130" y="174" font-size="22" fill="#9db0d8" font-family="Inter,Segoe UI,sans-serif">Cheap tariff period, charge battery for next-day high-price windows</text>
+<rect x="1090" y="118" width="170" height="36" fill="#93c5fd" rx="14"/>
+<text x="1175" y="142" text-anchor="middle" font-size="16" fill="#071021" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Tesla-style mockup</text>
+<circle cx="250" cy="250" r="56" fill="#2ec4b6" opacity="0.95"/>
+<text x="250" y="256" text-anchor="middle" font-size="20" fill="#081124" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Solar</text>
+<circle cx="460" cy="520" r="56" fill="#8b5cf6" opacity="0.95"/>
+<text x="460" y="526" text-anchor="middle" font-size="20" fill="#081124" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Battery</text>
+<circle cx="720" cy="250" r="56" fill="#f59e0b" opacity="0.95"/>
+<text x="720" y="256" text-anchor="middle" font-size="20" fill="#081124" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Home</text>
+<circle cx="1100" cy="250" r="56" fill="#60a5fa" opacity="0.95"/>
+<text x="1100" y="256" text-anchor="middle" font-size="20" fill="#081124" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Grid</text>
+<line x1="1038.0" y1="250.0" x2="782.0" y2="250.0" stroke="#ff9f43" stroke-width="7" marker-end="url(#arrowOrange)"/>
+<rect x="842.0" y="229.0" width="136" height="30" rx="12" fill="#081426" opacity="0.92"/>
+<text x="910.0" y="250.0" text-anchor="middle" font-size="16" fill="#dbeafe" font-family="Inter,Segoe UI,sans-serif">0.8 kW</text>
+<line x1="1042.9" y1="274.1" x2="517.1" y2="495.9" stroke="#ff9f43" stroke-width="7" marker-end="url(#arrowOrange)"/>
+<rect x="712.0" y="364.0" width="136" height="30" rx="12" fill="#081426" opacity="0.92"/>
+<text x="780.0" y="385.0" text-anchor="middle" font-size="16" fill="#dbeafe" font-family="Inter,Segoe UI,sans-serif">2.7 kW</text>
+<rect x="100" y="574" width="1200" height="130" fill="#0f223f" rx="20"/>
+<text x="130" y="614" font-size="26" fill="#dbeafe" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Money Flow (AUD/hour)</text>
+<text x="130" y="652" font-size="18" fill="#9db0d8" font-family="Inter,Segoe UI,sans-serif">Import cost</text>
+<text x="130" y="681" font-size="26" fill="#eaf1ff" font-family="Inter,Segoe UI,sans-serif" font-weight="700">$0.21/h</text>
+<text x="130" y="703" font-size="14" fill="#8fb3ff" font-family="Inter,Segoe UI,sans-serif">3.5 kW x $0.06</text>
+<text x="530" y="652" font-size="18" fill="#9db0d8" font-family="Inter,Segoe UI,sans-serif">Expected arbitrage value</text>
+<text x="530" y="681" font-size="26" fill="#eaf1ff" font-family="Inter,Segoe UI,sans-serif" font-weight="700">$0.35/h</text>
+<text x="530" y="703" font-size="14" fill="#8fb3ff" font-family="Inter,Segoe UI,sans-serif">Future spread capture</text>
+<text x="900" y="652" font-size="18" fill="#9db0d8" font-family="Inter,Segoe UI,sans-serif">Net strategy</text>
+<text x="900" y="681" font-size="26" fill="#eaf1ff" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Charge now</text>
+<text x="900" y="703" font-size="14" fill="#8fb3ff" font-family="Inter,Segoe UI,sans-serif">Use later in peak periods</text>
+</svg>
