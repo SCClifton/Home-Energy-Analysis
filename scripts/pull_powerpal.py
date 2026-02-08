@@ -8,10 +8,10 @@ Powerpal constraints:
 - History available ~12 months (you mentioned this)
 
 Usage:
-  set -a; source config/.env; set +a
+  set -a; source .env.local; set +a
   python scripts/pull_powerpal.py --start 2025-06-24 --end 2025-09-22
 
-Env vars (recommended, stored in config/.env which is gitignored):
+Env vars (recommended, stored in .env.local which is gitignored):
   POWERPAL_DEVICE_ID=0005191c
   POWERPAL_TOKEN=... (the long token from the CSV URL)
   POWERPAL_SAMPLE=1  (1 = minutes, per app UI)
@@ -28,10 +28,12 @@ from typing import Optional, Tuple, List
 
 import pandas as pd
 import requests
+from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Australia/Sydney")
 BASE_URL = "https://readings.powerpal.net/csv/v1"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -219,10 +221,13 @@ def main() -> int:
     parser.add_argument("--sample-minutes", type=int, default=None, help="Sample interval minutes (default from env POWERPAL_SAMPLE)")
     args = parser.parse_args()
 
+    # Local fallback env loading for development.
+    load_dotenv(PROJECT_ROOT / ".env.local", override=False)
+
     device_id = os.getenv("POWERPAL_DEVICE_ID")
     token = os.getenv("POWERPAL_TOKEN")
     if not device_id or not token:
-        raise SystemExit("ERROR: Set POWERPAL_DEVICE_ID and POWERPAL_TOKEN in config/.env (do not commit them).")
+        raise SystemExit("ERROR: Set POWERPAL_DEVICE_ID and POWERPAL_TOKEN in environment or .env.local.")
 
     sample_env = os.getenv("POWERPAL_SAMPLE", "1")
     sample_minutes = args.sample_minutes if args.sample_minutes is not None else int(sample_env)

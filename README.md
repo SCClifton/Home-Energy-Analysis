@@ -104,11 +104,11 @@ pip install -e .
 
 ### Configure environment
 
-Load your secrets:
+Load your secrets (from `.env.local`) if you want shell-exported variables:
 
 ```bash
 set -a
-source config/.env
+source .env.local
 set +a
 ```
 
@@ -125,6 +125,30 @@ Open `http://127.0.0.1:5050/` in your browser.
 ```bash
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
 ```
+
+### Live UI iteration loop (recommended)
+
+Use this when tuning dashboard HTML/CSS/JS locally:
+
+```bash
+PORT=5050 DEBUG=1 \
+AMBER_SITE_ID=YOUR_SITE_ID \
+SQLITE_PATH=$(pwd)/data_local/cache.sqlite \
+python dashboard_app/app/main.py
+```
+
+Then open `http://127.0.0.1:5050/` and hard-refresh (`Cmd+Shift+R`) after edits.
+Set browser viewport to `800x480` to mirror the Pi display.
+
+## Dashboard data semantics (important)
+
+The dashboard is cache-first. If usage is delayed, cost-related cards can be stale.
+
+- `CACHED PRICE` means price data is from SQLite cache.
+- `Price`/`Usage` freshness pills come from `/api/health` age thresholds.
+- `MONTH TO DATE` is computed from cached `usage.cost_aud` rows only.
+- If usage data is delayed, the UI intentionally shows "reported"/lag wording.
+- If there are no current-month usage rows in cache, MTD may legitimately show `—`.
 
 ## Supabase
 
@@ -221,6 +245,33 @@ curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
 
 # Optional: confirm cache refresh timer exists
 systemctl list-timers --all | grep -E "home-energy-sync-cache" || true
+```
+
+### GitHub -> Pi deployment workflow
+
+On your development machine:
+
+```bash
+git add -A
+git commit -m "Detailed message describing behavior changes and operational impact"
+git push
+```
+
+On the Pi:
+
+```bash
+cd ~/repos/Home-Energy-Analysis
+git pull --ff-only
+./pi/update.sh
+```
+
+Post-deploy verification:
+
+```bash
+curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/totals | python -m json.tool
+systemctl --user status home-energy-kiosk.service --no-pager -l
+sudo systemctl list-timers --all | grep home-energy
 ```
 
 ## Troubleshooting

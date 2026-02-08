@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Smoke test script for Supabase Postgres connection.
-Loads .env.local and runs a simple "SELECT NOW()" query.
+
+Uses current process environment, with optional `.env.local` fallback for local dev.
 """
 import os
 import sys
@@ -17,18 +18,14 @@ from home_energy_analysis.storage import supabase_db
 
 def main():
     """Load environment and test database connection."""
-    # Load .env.local from project root
+    # Optional local fallback.
     env_path = project_root / ".env.local"
-    if not env_path.exists():
-        print(f"Error: .env.local not found at {env_path}")
-        print("Please create .env.local with SUPABASE_DB_URL=...")
-        sys.exit(1)
-    
-    load_dotenv(env_path)
+    if env_path.exists():
+        load_dotenv(env_path, override=False)
     
     # Check for required env var
     if not os.environ.get("SUPABASE_DB_URL"):
-        print("Error: SUPABASE_DB_URL not found in .env.local")
+        print("Error: SUPABASE_DB_URL environment variable is required")
         sys.exit(1)
     
     # Test connection
@@ -47,4 +44,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

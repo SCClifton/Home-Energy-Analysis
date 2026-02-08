@@ -87,10 +87,20 @@ function formatAsOf(timestampStr) {
 // Format minutes ago
 function formatMinutesAgo(ageSeconds) {
     if (ageSeconds === null || ageSeconds === undefined) return "Updated -- ago";
-    const minutes = Math.floor(ageSeconds / 60);
-    if (minutes === 0) return "Updated just now";
-    if (minutes === 1) return "Updated 1 min ago";
-    return `Updated ${minutes} mins ago`;
+    return `Updated ${formatLag(ageSeconds)} ago`;
+}
+
+function formatLag(ageSeconds) {
+    if (ageSeconds === null || ageSeconds === undefined) return "unknown lag";
+    const totalMinutes = Math.floor(ageSeconds / 60);
+    const days = Math.floor(totalMinutes / (24 * 60));
+    const remAfterDays = totalMinutes % (24 * 60);
+    const dayHours = Math.floor(remAfterDays / 60);
+    if (days > 0) return dayHours === 0 ? `${days}d` : `${days}d ${dayHours}h`;
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    if (hours <= 0) return `${mins}m`;
+    return mins === 0 ? `${hours}h` : `${hours}h ${mins}m`;
 }
 
 // Get price freshness status
@@ -127,6 +137,13 @@ function getFooterMessage(priceLevel, intervalLabel) {
     } else {
         return `Monitoring energy prices • ${intervalLabel || "Current interval"}`;
     }
+}
+
+function getFooterMessageWithFreshness(priceLevel, intervalLabel, priceAgeSeconds) {
+    if (priceAgeSeconds !== null && priceAgeSeconds !== undefined && priceAgeSeconds > 900) {
+        return `Using cached data (${formatLag(priceAgeSeconds)} old)`;
+    }
+    return getFooterMessage(priceLevel, intervalLabel);
 }
 
 // Forecast constants
@@ -366,6 +383,10 @@ function updateUI() {
             document.getElementById('renewables-bar').style.width = '0%';
             document.getElementById('mtd-value').textContent = '—';
             document.getElementById('mtd-asof').textContent = 'Waiting for data';
+            document.getElementById('mtd-note').textContent = 'Based on reported usage intervals';
+            document.getElementById('mtd-title').textContent = 'MONTH TO DATE';
+            document.querySelector('.mtd-card')?.classList.remove('is-delayed');
+            document.getElementById('footer-message').textContent = 'Waiting for cached data';
             return;
         }
         
@@ -424,20 +445,40 @@ function updateUI() {
         }
         
         // Update totals card
+        const mtdTitle = document.getElementById('mtd-title');
+        const mtdNote = document.getElementById('mtd-note');
+        const mtdCard = document.querySelector('.mtd-card');
+        const delayedBadge = document.getElementById('totals-delayed');
+
         if (totalsData && totalsData.month_to_date_cost_aud !== null) {
             document.getElementById('mtd-value').textContent = totalsData.month_to_date_cost_aud.toFixed(2);
             document.getElementById('mtd-asof').textContent = formatAsOf(totalsData.as_of_interval_end);
-            
-            const delayedBadge = document.getElementById('totals-delayed');
+
             if (totalsData.is_delayed) {
+                mtdTitle.textContent = 'MONTH TO DATE (REPORTED)';
+                mtdNote.textContent = `Amber usage lag ${formatLag(totalsData.usage_age_seconds)}.`;
                 delayedBadge.hidden = false;
+                mtdCard?.classList.add('is-delayed');
             } else {
+                mtdTitle.textContent = 'MONTH TO DATE';
+                mtdNote.textContent = 'Based on reported usage intervals';
                 delayedBadge.hidden = true;
+                mtdCard?.classList.remove('is-delayed');
             }
         } else {
             document.getElementById('mtd-value').textContent = '—';
-            document.getElementById('mtd-asof').textContent = totalsData?.message || 'Waiting for data';
-            document.getElementById('totals-delayed').hidden = true;
+            const usageAgeSeconds = healthData?.usage_age_seconds;
+            const usageIsStale = usageAgeSeconds !== null && usageAgeSeconds !== undefined && usageAgeSeconds > 1800;
+            if (usageIsStale) {
+                document.getElementById('mtd-asof').textContent = 'No current-month usage in cache';
+                mtdNote.textContent = `Last usage update ${formatLag(usageAgeSeconds)} ago.`;
+            } else {
+                document.getElementById('mtd-asof').textContent = totalsData?.message || 'Waiting for data';
+                mtdNote.textContent = 'Based on reported usage intervals';
+            }
+            mtdTitle.textContent = 'MONTH TO DATE';
+            delayedBadge.hidden = true;
+            mtdCard?.classList.remove('is-delayed');
         }
         
         // Update status pills
@@ -454,7 +495,7 @@ function updateUI() {
         }
         
         // Update footer message
-        const footerMessage = getFooterMessage(priceLevel.level, intervalLabel);
+        const footerMessage = getFooterMessageWithFreshness(priceLevel.level, intervalLabel, priceAgeSeconds);
         document.getElementById('footer-message').textContent = footerMessage;
         
         // Update forecast

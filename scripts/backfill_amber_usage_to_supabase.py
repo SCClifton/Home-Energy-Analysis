@@ -364,9 +364,8 @@ def main() -> int:
         logger.error("--chunk-days must be >= --min-chunk-days")
         return 1
     
-    # Load environment variables in specified order
-    load_dotenv("config/.env", override=False)
-    load_dotenv(".env.local", override=True)
+    # Load local fallback env file for development. On Pi, systemd provides env.
+    load_dotenv(project_root / ".env.local", override=False)
     
     # Check required environment variables
     amber_token = os.getenv("AMBER_TOKEN")
@@ -374,13 +373,13 @@ def main() -> int:
     supabase_url = os.getenv("SUPABASE_DB_URL")
     
     if not amber_token:
-        logger.error("AMBER_TOKEN not found in config/.env")
+        logger.error("AMBER_TOKEN environment variable is required")
         return 1
     if not site_id:
-        logger.error("AMBER_SITE_ID not found in config/.env")
+        logger.error("AMBER_SITE_ID environment variable is required")
         return 1
     if not supabase_url:
-        logger.error("SUPABASE_DB_URL not found in .env.local")
+        logger.error("SUPABASE_DB_URL environment variable is required")
         return 1
     
     # Initialize clients
@@ -529,4 +528,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

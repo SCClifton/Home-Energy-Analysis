@@ -377,9 +377,10 @@ body {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: #F59E0B;
-    background: rgba(245, 158, 11, 0.2);
-    padding: 2px 6px;
+    color: #FED7AA;
+    background: rgba(234, 88, 12, 0.28);
+    border: 1px solid rgba(251, 146, 60, 0.55);
+    padding: 2px 7px;
     border-radius: 4px;
 }
 
@@ -409,6 +410,23 @@ body {
 
 .mtd-card .card-sub {
     font-size: 10px;
+    opacity: 0.75;
+}
+
+.card-note {
+    margin-top: 4px;
+    font-size: 9px;
+    line-height: 1.2;
+    opacity: 0.72;
+}
+
+.mtd-card.is-delayed .metric-num,
+.mtd-card.is-delayed .metric-currency {
+    color: #FED7AA;
+}
+
+.mtd-card.is-delayed {
+    border-color: rgba(251, 146, 60, 0.45);
 }
 
 .metric-unit {

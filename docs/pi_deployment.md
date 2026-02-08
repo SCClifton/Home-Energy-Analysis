@@ -231,6 +231,21 @@ journalctl -u home-energy-supabase-forward-sync.service -n 80 --no-pager
 journalctl -u home-energy-supabase-keepalive.service -n 50 --no-pager
 ```
 
+Dashboard endpoint checks (recommended after updates):
+
+```bash
+curl -fsS http://127.0.0.1:5050/api/price | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/forecast?hours=3 | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/totals | python -m json.tool
+```
+
+Interpretation notes:
+
+- `CACHED PRICE` indicates the dashboard is serving cached price intervals.
+- `/api/totals` reflects only cached usage rows with `cost_aud`.
+- If Amber usage is delayed, MTD may show delayed/lagging context or `—` if no current-month usage is cached.
+- This is expected behavior for offline-first operation and should not be treated as a dashboard crash.
+
 ## Verify Chromium flags
 
 Verify Chromium is running with the expected flags:
@@ -300,7 +315,22 @@ After updating, verify:
 sudo systemctl status home-energy-dashboard.service --no-pager -l
 systemctl --user status home-energy-kiosk.service --no-pager -l
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/totals | python -m json.tool
 ```
+
+Recommended update sequence from Mac -> GitHub -> Pi:
+
+1. On Mac:
+   - Commit with a detailed message that includes behavior and ops impact.
+   - Push to GitHub.
+2. On Pi:
+   - `git pull --ff-only`
+   - `./pi/update.sh`
+3. Verify:
+   - Dashboard health endpoint
+   - Totals endpoint semantics
+   - Kiosk service status
+   - Forward sync/keepalive timers and recent journal entries
 
 ## Troubleshooting
 

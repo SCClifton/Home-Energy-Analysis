@@ -29,9 +29,9 @@ from zoneinfo import ZoneInfo
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-# Load environment variables
-load_dotenv(project_root / "config/.env", override=False)
-load_dotenv(project_root / ".env.local", override=True)
+# Load local fallback environment variables for development.
+# On Pi, services should provide env directly.
+load_dotenv(project_root / ".env.local", override=False)
 
 from home_energy_analysis.storage import supabase_db
 
@@ -234,7 +234,7 @@ def main() -> int:
     
     # Check database connection
     if not os.getenv("SUPABASE_DB_URL"):
-        print("ERROR: SUPABASE_DB_URL not found in .env.local", file=sys.stderr)
+        print("ERROR: SUPABASE_DB_URL environment variable is required", file=sys.stderr)
         return 1
     
     # Read CSV
@@ -330,4 +330,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

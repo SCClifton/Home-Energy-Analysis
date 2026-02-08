@@ -79,8 +79,8 @@ def main() -> int:
     start_date = end_date - timedelta(days=args.days_back)
 
     project_root = Path(__file__).resolve().parents[1]
-    load_dotenv(project_root / "config/.env", override=False)
-    load_dotenv(project_root / ".env.local", override=True)
+    # Local fallback for development. On Pi, systemd EnvironmentFile provides env.
+    load_dotenv(project_root / ".env.local", override=False)
 
     logger.info("Forward sync window: %s to %s", start_date.isoformat(), end_date.isoformat())
 

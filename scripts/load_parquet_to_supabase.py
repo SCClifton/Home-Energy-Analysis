@@ -154,17 +154,14 @@ def main():
         print(f"Error: Parquet file not found: {args.parquet}")
         sys.exit(1)
     
-    # Load environment
+    # Load local fallback env for development. On Pi, systemd provides env.
     env_path = project_root / ".env.local"
-    if not env_path.exists():
-        print(f"Error: .env.local not found at {env_path}")
-        sys.exit(1)
-    
-    load_dotenv(env_path)
+    if env_path.exists():
+        load_dotenv(env_path, override=False)
     from home_energy_analysis.storage import supabase_db
     
     if not os.environ.get("SUPABASE_DB_URL"):
-        print("Error: SUPABASE_DB_URL not found in .env.local")
+        print("Error: SUPABASE_DB_URL environment variable is required")
         sys.exit(1)
     
     # Parse is_forecast
@@ -261,4 +258,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

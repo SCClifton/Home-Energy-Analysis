@@ -1,0 +1,15 @@
+[Unit]
+Description=Home Energy Supabase keepalive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sam
+Group=sam
+WorkingDirectory=/home/sam/repos/Home-Energy-Analysis
+EnvironmentFile=/etc/home-energy-analysis/dashboard.env
+ExecStart=/home/sam/repos/Home-Energy-Analysis/.venv/bin/python /home/sam/repos/Home-Energy-Analysis/scripts/supabase_keepalive.py
+
+[Install]
+WantedBy=multi-user.target

@@ -27,10 +27,10 @@ import requests
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 
-# Load environment variables
+# Load local fallback environment variables for development.
+# On Pi, services should provide env directly.
 project_root = Path(__file__).parent.parent
-load_dotenv(project_root / "config/.env", override=False)
-load_dotenv(project_root / ".env.local", override=True)
+load_dotenv(project_root / ".env.local", override=False)
 
 TZ = ZoneInfo("Australia/Sydney")
 BASE_URL = "https://readings.powerpal.net/csv/v1"
@@ -255,4 +255,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

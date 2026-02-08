@@ -1,5 +1,26 @@
 # Project Progress
 
+## 2026-02-08
+
+* Restored missing Supabase keepalive artifacts in-repo:
+  * Implemented `scripts/supabase_keepalive.py` (connect + `SELECT NOW()` probe with clear logging).
+  * Added systemd units `pi/systemd/home-energy-supabase-keepalive.service` and `pi/systemd/home-energy-supabase-keepalive.timer`.
+* Aligned forward sync service with Pi env-file conventions:
+  * Added `EnvironmentFile=/etc/home-energy-analysis/dashboard.env` to `pi/systemd/home-energy-supabase-forward-sync.service`.
+* Standardised script env loading to prefer process env with `.env.local` fallback:
+  * Updated active scripts to stop requiring `config/.env` (`backfill_*`, `forward_sync_supabase.py`, Powerpal scripts, Supabase smoke/load scripts).
+  * Updated error messages to reference required environment variables directly.
+* Improved dashboard stale/offline UX semantics for cost reporting:
+  * MTD card now distinguishes delayed/reported usage context from current live interpretation.
+  * Added explicit empty-state wording when no current-month usage exists in cache.
+  * Converted large staleness ages to human-readable day/hour format for readability on the 5" display.
+* Updated README local setup snippet to source `.env.local` instead of `config/.env`.
+* Expanded operational documentation:
+  * Added local live UI iteration loop and cache semantics notes to `README.md`.
+  * Added richer Pi verification and Mac->GitHub->Pi rollout workflow in `docs/pi_deployment.md`.
+* Local verification:
+  * `.venv/bin/python -m pytest -q` → all tests passing (`23 passed`).
+
 
 ## 2026-01-17
 
