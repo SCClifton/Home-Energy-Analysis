@@ -2,6 +2,32 @@
 
 ## 2026-02-08
 
+### Digital twin simulation (10 kW PV + 10 kWh battery)
+
+* Implemented scenario modelling package under `analysis/src/scenario/`:
+  * PV generation model driven by real irradiance/weather (Open-Meteo, Vaucluse NSW coordinates).
+  * Battery SoC model with power caps, reserve floor, round-trip efficiency, and optional degradation cost.
+  * Two dispatch modes: `rule` and `optimizer` (lookahead/value-maximizing heuristic with export arbitrage).
+* Added orchestrator scripts:
+  * `scripts/run_scenario_simulation.py` for `backtest` and `live` modes.
+  * `scripts/run_simulation_live.py` wrapper for timer-driven 5-minute runs.
+* Extended SQLite cache schema and storage helpers:
+  * New tables: `irradiance`, `simulation_intervals`, `simulation_runs`.
+  * Idempotent upserts/reads for simulation summary + interval chart data.
+* Added simulation APIs + second dashboard page:
+  * `GET /api/simulation/status`
+  * `GET /api/simulation/intervals`
+  * `GET /simulation`
+  * New assets: `simulation.html`, `simulation.js`, `simulation.css`.
+* Added Raspberry Pi timer artifacts for live simulation refresh:
+  * `pi/systemd/home-energy-simulation.service`
+  * `pi/systemd/home-energy-simulation.timer`
+* Test coverage added:
+  * `tests/test_scenario_engine.py` (SoC constraints, dispatch validity, cost calculations, Sydney window logic).
+  * `tests/test_simulation_endpoint.py` (simulation status/interval endpoint integration).
+* Verification:
+  * `.venv/bin/python -m pytest -q` -> `28 passed`.
+
 * Restored missing Supabase keepalive artifacts in-repo:
   * Implemented `scripts/supabase_keepalive.py` (connect + `SELECT NOW()` probe with clear logging).
   * Added systemd units `pi/systemd/home-energy-supabase-keepalive.service` and `pi/systemd/home-energy-supabase-keepalive.timer`.
