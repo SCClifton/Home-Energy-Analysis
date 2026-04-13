@@ -17,9 +17,10 @@ CLI options:
 import argparse
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Sequence
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -36,6 +37,26 @@ load_dotenv(project_root / ".env.local", override=False)
 from home_energy_analysis.storage import supabase_db
 
 TZ = ZoneInfo("Australia/Sydney")
+
+
+@dataclass
+class FileLoadSummary:
+    """Summary of a parsed Powerpal CSV file."""
+
+    path: Path
+    input_rows: int
+    valid_intervals: int
+    dropped_invalid_rows: int
+    invalid_timestamp_rows: int
+    duplicate_intervals: int
+    gap_count: int
+    missing_minutes: int
+    first_interval_start: Optional[datetime]
+    last_interval_start: Optional[datetime]
+    last_interval_end: Optional[datetime]
+    parse_mode_msg: str
+    is_empty: bool = False
+    upserted_count: Optional[int] = None
 
 
 def detect_timestamp_column(df: pd.DataFrame) -> Optional[str]:
@@ -205,125 +226,277 @@ def build_usage_intervals(
     return rows, na_count, parse_mode_msg
 
 
-def main() -> int:
+def summarize_intervals(
+    csv_path: Path,
+    df_row_count: int,
+    rows: List[Dict[str, Any]],
+    invalid_timestamp_rows: int,
+    parse_mode_msg: str,
+    is_empty: bool = False,
+) -> FileLoadSummary:
+    """Build per-file interval coverage diagnostics."""
+    starts = [row["interval_start"] for row in rows]
+    unique_starts = sorted(set(starts))
+    duplicate_intervals = len(starts) - len(unique_starts)
+    dropped_invalid_rows = df_row_count - len(rows)
+
+    gap_count = 0
+    missing_minutes = 0
+    if len(unique_starts) > 1:
+        previous = unique_starts[0]
+        for current in unique_starts[1:]:
+            gap_minutes = int((current - previous).total_seconds() // 60)
+            if gap_minutes > 1:
+                gap_count += 1
+                missing_minutes += gap_minutes - 1
+            previous = current
+
+    first_interval_start = unique_starts[0] if unique_starts else None
+    last_interval_start = unique_starts[-1] if unique_starts else None
+    last_interval_end = None
+    if rows:
+        last_interval_end = max(row["interval_end"] for row in rows)
+
+    return FileLoadSummary(
+        path=csv_path,
+        input_rows=df_row_count,
+        valid_intervals=len(rows),
+        dropped_invalid_rows=dropped_invalid_rows,
+        invalid_timestamp_rows=invalid_timestamp_rows,
+        duplicate_intervals=duplicate_intervals,
+        gap_count=gap_count,
+        missing_minutes=missing_minutes,
+        first_interval_start=first_interval_start,
+        last_interval_start=last_interval_start,
+        last_interval_end=last_interval_end,
+        parse_mode_msg=parse_mode_msg,
+        is_empty=is_empty,
+    )
+
+
+def print_file_summary(summary: FileLoadSummary) -> None:
+    """Print a concise per-file load/dry-run summary."""
+    print(f"Summary for {summary.path}:")
+    if summary.is_empty:
+        print("  Empty/header-only CSV: skipped")
+        return
+    print(f"  Input rows: {summary.input_rows}")
+    print(f"  Valid intervals: {summary.valid_intervals}")
+    print(f"  Dropped invalid rows: {summary.dropped_invalid_rows}")
+    print(f"  Invalid timestamp rows: {summary.invalid_timestamp_rows}")
+    print(f"  Duplicate intervals: {summary.duplicate_intervals}")
+    print(f"  Gap count: {summary.gap_count}")
+    print(f"  Missing minutes inside range: {summary.missing_minutes}")
+    print(f"  First interval start: {summary.first_interval_start}")
+    print(f"  Last interval start: {summary.last_interval_start}")
+    print(f"  Last interval end: {summary.last_interval_end}")
+    if summary.upserted_count is not None:
+        print(f"  Upserted intervals: {summary.upserted_count}")
+
+
+def summarize_aggregate(summaries: Sequence[FileLoadSummary], all_rows: List[Dict[str, Any]]) -> FileLoadSummary:
+    """Build aggregate coverage diagnostics across all processed files."""
+    input_rows = sum(summary.input_rows for summary in summaries)
+    invalid_timestamp_rows = sum(summary.invalid_timestamp_rows for summary in summaries)
+    summary = summarize_intervals(
+        Path("<aggregate>"),
+        input_rows,
+        all_rows,
+        invalid_timestamp_rows,
+        "Aggregate across processed files",
+        is_empty=not bool(all_rows),
+    )
+    return summary
+
+
+def read_powerpal_csv(csv_path: Path) -> pd.DataFrame:
+    """Read a Powerpal CSV file and strip column whitespace."""
+    df = pd.read_csv(csv_path)
+    df.columns = [c.strip() for c in df.columns]
+    return df
+
+
+def manifest_csv_paths(manifest_path: Path) -> List[Path]:
+    """Return CSV file paths from a Powerpal manifest, preserving first-seen order."""
+    manifest_df = pd.read_csv(manifest_path)
+    if "file" not in manifest_df.columns:
+        raise ValueError(f"Manifest missing required 'file' column: {manifest_path}")
+
+    paths: List[Path] = []
+    seen: set[str] = set()
+    for raw_path in manifest_df["file"].dropna().astype(str):
+        if raw_path in seen:
+            continue
+        seen.add(raw_path)
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = project_root / path
+        paths.append(path)
+    return paths
+
+
+def process_csv_file(
+    csv_path: Path,
+    site_id: str,
+    channel_type: str,
+    source: str,
+    dry_run: bool,
+    conn=None,
+) -> tuple[FileLoadSummary, List[Dict[str, Any]]]:
+    """Parse, summarize, and optionally load a single Powerpal CSV file."""
+    if not csv_path.exists():
+        raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+    print(f"Reading CSV: {csv_path}")
+    df = read_powerpal_csv(csv_path)
+    print(f"  Loaded {len(df)} rows")
+    print(f"  Columns: {list(df.columns)}")
+
+    if len(df) == 0:
+        summary = summarize_intervals(csv_path, 0, [], 0, "No data rows", is_empty=True)
+        print_file_summary(summary)
+        return summary, []
+
+    timestamp_col = detect_timestamp_column(df)
+    if timestamp_col is None:
+        raise ValueError(f"Could not detect timestamp column. Columns: {list(df.columns)}")
+
+    kwh_col = detect_kwh_column(df)
+    if kwh_col is None:
+        raise ValueError(f"Could not detect kWh column. Columns: {list(df.columns)}")
+
+    print(f"  Using timestamp column: {timestamp_col}")
+    print(f"  Using kWh column: {kwh_col}")
+
+    raw_event_id = "dry-run"
+    if not dry_run:
+        payload_dict = {
+            "file": str(csv_path),
+            "row_count": len(df),
+            "site_id": site_id,
+            "source": source,
+            "channel_type": channel_type,
+        }
+        raw_event_id = supabase_db.insert_ingest_event(
+            conn, source, "usage", payload_dict,
+            window_start=None, window_end=None
+        )
+        print(f"Created ingest event: {raw_event_id}")
+
+    print("Building usage intervals...")
+    rows, na_count, parse_mode_msg = build_usage_intervals(
+        df, timestamp_col, kwh_col,
+        site_id, channel_type, source, raw_event_id
+    )
+
+    print(f"  {parse_mode_msg}")
+    summary = summarize_intervals(csv_path, len(df), rows, na_count, parse_mode_msg)
+
+    if not rows:
+        print_file_summary(summary)
+        return summary, rows
+
+    if not dry_run:
+        print("Upserting to database...")
+        summary.upserted_count = supabase_db.upsert_usage_intervals(conn, rows)
+
+    print_file_summary(summary)
+    return summary, rows
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
         description="Load Powerpal minute CSV into Supabase usage_intervals"
     )
-    parser.add_argument("--csv", required=True, type=Path,
-                        help="Path to CSV file")
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("--csv", type=Path,
+                             help="Path to one CSV file")
+    input_group.add_argument("--manifest", type=Path,
+                             help="Path to manifest CSV listing Powerpal files")
     parser.add_argument("--site-id", type=str, default=None,
                         help="Site ID (default: AMBER_SITE_ID env var)")
     parser.add_argument("--source", type=str, default="powerpal",
                         help="Source identifier (default: powerpal)")
     parser.add_argument("--channel-type", type=str, default="general",
                         help="Channel type (default: general)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Parse and summarize files without connecting to Supabase")
     
-    args = parser.parse_args()
-    
-    # Validate CSV file exists
-    if not args.csv.exists():
-        print(f"ERROR: CSV file not found: {args.csv}", file=sys.stderr)
-        return 1
+    args = parser.parse_args(argv)
     
     # Get site_id
-    site_id = args.site_id or os.getenv("AMBER_SITE_ID")
+    site_id = args.site_id or os.getenv("AMBER_SITE_ID") or ("dry-run-site" if args.dry_run else None)
     if not site_id:
         print("ERROR: --site-id required or AMBER_SITE_ID must be set", file=sys.stderr)
         return 1
     
     # Check database connection
-    if not os.getenv("SUPABASE_DB_URL"):
+    if not args.dry_run and not os.getenv("SUPABASE_DB_URL"):
         print("ERROR: SUPABASE_DB_URL environment variable is required", file=sys.stderr)
         return 1
-    
-    # Read CSV
-    print(f"Reading CSV: {args.csv}")
+
+    if args.csv:
+        csv_paths = [args.csv]
+    else:
+        if not args.manifest.exists():
+            print(f"ERROR: Manifest file not found: {args.manifest}", file=sys.stderr)
+            return 1
+        try:
+            csv_paths = manifest_csv_paths(args.manifest)
+        except Exception as e:
+            print(f"ERROR: Failed to read manifest: {e}", file=sys.stderr)
+            return 1
+
+    if not csv_paths:
+        print("ERROR: No CSV files found to process", file=sys.stderr)
+        return 1
+
+    conn = None
+    if not args.dry_run:
+        try:
+            conn = supabase_db.get_conn()
+        except Exception as e:
+            print(f"ERROR: Failed to connect to database: {e}", file=sys.stderr)
+            return 1
+
+    summaries: List[FileLoadSummary] = []
+    all_rows: List[Dict[str, Any]] = []
+
     try:
-        df = pd.read_csv(args.csv)
-        df.columns = [c.strip() for c in df.columns]  # Strip whitespace from column names
-        print(f"  Loaded {len(df)} rows")
-        print(f"  Columns: {list(df.columns)}")
-    except Exception as e:
-        print(f"ERROR: Failed to read CSV: {e}", file=sys.stderr)
-        return 1
-    
-    if len(df) == 0:
-        print("ERROR: CSV file is empty", file=sys.stderr)
-        return 1
-    
-    # Detect columns
-    timestamp_col = detect_timestamp_column(df)
-    if timestamp_col is None:
-        print(f"ERROR: Could not detect timestamp column. Columns: {list(df.columns)}", file=sys.stderr)
-        return 1
-    
-    kwh_col = detect_kwh_column(df)
-    if kwh_col is None:
-        print(f"ERROR: Could not detect kWh column. Columns: {list(df.columns)}", file=sys.stderr)
-        return 1
-    
-    print(f"  Using timestamp column: {timestamp_col}")
-    print(f"  Using kWh column: {kwh_col}")
-    
-    # Connect to database
-    try:
-        conn = supabase_db.get_conn()
-    except Exception as e:
-        print(f"ERROR: Failed to connect to database: {e}", file=sys.stderr)
-        return 1
-    
-    try:
-        # Create ingest event
-        payload_dict = {
-            "file": str(args.csv),
-            "row_count": len(df),
-            "site_id": site_id,
-            "source": args.source,
-            "channel_type": args.channel_type,
-        }
-        
-        # Determine time window from data (optional, will be computed from intervals)
-        window_start = None
-        window_end = None
-        # We'll compute this after parsing timestamps, but it's optional
-        
-        raw_event_id = supabase_db.insert_ingest_event(
-            conn, args.source, "usage", payload_dict,
-            window_start=window_start, window_end=window_end
-        )
-        print(f"Created ingest event: {raw_event_id}")
-        
-        # Build usage intervals
-        print("Building usage intervals...")
-        rows, na_count, parse_mode_msg = build_usage_intervals(
-            df, timestamp_col, kwh_col,
-            site_id, args.channel_type, args.source, raw_event_id
-        )
-        
-        # Log parse mode and NaT count
-        print(f"  {parse_mode_msg}")
-        if na_count > 0:
-            print(f"  Warning: Dropped {na_count} rows with invalid timestamps (NaT)")
-        print(f"  Built {len(rows)} intervals")
-        
-        if len(rows) == 0:
+        for csv_path in csv_paths:
+            summary, rows = process_csv_file(
+                csv_path,
+                site_id,
+                args.channel_type,
+                args.source,
+                args.dry_run,
+                conn=conn,
+            )
+            summaries.append(summary)
+            all_rows.extend(rows)
+            print()
+
+        aggregate = summarize_aggregate(summaries, all_rows)
+        print("=== Aggregate coverage ===")
+        print_file_summary(aggregate)
+        if args.dry_run:
+            print("Dry run complete; no Supabase writes were attempted.")
+
+        if args.csv and not all_rows:
             print("ERROR: No valid intervals found", file=sys.stderr)
             return 1
-        
-        # Upsert to database
-        print("Upserting to database...")
-        count = supabase_db.upsert_usage_intervals(conn, rows)
-        print(f"✓ Upserted {count} usage intervals")
-        
+
     except Exception as e:
         print(f"ERROR: Failed to process data: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
-        conn.rollback()
+        if conn:
+            conn.rollback()
         return 1
     finally:
-        conn.close()
+        if conn:
+            conn.close()
     
     return 0
 
