@@ -7,12 +7,15 @@ Usage:
 """
 import argparse
 import os
+import random
 import sys
 import logging
 import time
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Callable, Optional, Dict, Any, List
 
 from dotenv import load_dotenv
 import psycopg
@@ -33,6 +36,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class BackoffConfig:
+    """Retry and request pacing settings for Amber usage backfill."""
+
+    max_retries: int = 5
+    base_backoff_seconds: float = 2.0
+    max_backoff_seconds: float = 300.0
+    jitter_seconds: float = 0.5
+
+
 def _parse_date(value: str) -> date:
     """Parse YYYY-MM-DD date string."""
     try:
@@ -44,6 +57,81 @@ def _parse_date(value: str) -> date:
 def _parse_bool(value: str) -> bool:
     """Parse true/false string to boolean."""
     return value.lower() == "true"
+
+
+def parse_retry_after(value: Optional[str], now: Optional[datetime] = None) -> Optional[float]:
+    """
+    Parse Retry-After as seconds or an HTTP date.
+
+    Returns:
+        Non-negative delay in seconds, or None when the value is absent/invalid.
+    """
+    if not value:
+        return None
+
+    value = value.strip()
+    if not value:
+        return None
+
+    try:
+        seconds = float(value)
+        return max(0.0, seconds)
+    except ValueError:
+        pass
+
+    try:
+        retry_dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        return None
+
+    if retry_dt.tzinfo is None:
+        retry_dt = retry_dt.replace(tzinfo=timezone.utc)
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
+
+    return max(0.0, (retry_dt.astimezone(timezone.utc) - now).total_seconds())
+
+
+def retry_after_delay(error: AmberAPIError, now: Optional[datetime] = None) -> Optional[float]:
+    """Return Retry-After delay from an Amber API error, if available."""
+    headers = getattr(error, "response_headers", None) or {}
+    for key, value in headers.items():
+        if key.lower() == "retry-after":
+            return parse_retry_after(str(value), now=now)
+    return None
+
+
+def backoff_delay(attempt: int, config: BackoffConfig, jitter_fn: Callable[[float, float], float] = random.uniform) -> float:
+    """Return capped exponential backoff delay with optional jitter."""
+    delay = min(
+        config.max_backoff_seconds,
+        config.base_backoff_seconds * (2 ** max(0, attempt)),
+    )
+    if config.jitter_seconds > 0:
+        delay += jitter_fn(0.0, config.jitter_seconds)
+    return delay
+
+
+def reduced_chunk_days(active_chunk_days: int, min_chunk_days: int) -> int:
+    """Reduce chunk size for repeated rate limits without going below the minimum."""
+    return max(min_chunk_days, max(1, active_chunk_days // 2))
+
+
+def restored_chunk_days(active_chunk_days: int, target_chunk_days: int) -> int:
+    """Gradually restore chunk size after successful windows."""
+    if active_chunk_days >= target_chunk_days:
+        return target_chunk_days
+    return min(target_chunk_days, max(active_chunk_days + 1, active_chunk_days * 2))
+
+
+def is_rate_limit_error(error: Exception) -> bool:
+    """Return True when the exception is an Amber HTTP 429."""
+    return isinstance(error, AmberAPIError) and error.status_code == 429
 
 
 def get_max_interval_start(
@@ -172,8 +260,9 @@ def fetch_usage_with_retry(
     window_start: date,
     window_end: date,
     resolution: Optional[str] = None,
-    max_retries: int = 5,
-    initial_backoff: float = 1.0
+    backoff_config: Optional[BackoffConfig] = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    jitter_fn: Callable[[float, float], float] = random.uniform,
 ) -> List[Dict[str, Any]]:
     """
     Fetch usage from Amber API with retry logic.
@@ -184,8 +273,9 @@ def fetch_usage_with_retry(
         window_start: Start date (inclusive)
         window_end: End date (inclusive)
         resolution: Optional resolution parameter
-        max_retries: Maximum number of retry attempts
-        initial_backoff: Initial backoff time in seconds
+        backoff_config: Retry/backoff configuration
+        sleep_fn: Sleep function for tests and runtime delays
+        jitter_fn: Jitter function for tests and runtime delays
         
     Returns:
         List of raw usage dictionaries from Amber API
@@ -193,9 +283,10 @@ def fetch_usage_with_retry(
     Raises:
         AmberAPIError: If all retries fail
     """
-    backoff = initial_backoff
+    if backoff_config is None:
+        backoff_config = BackoffConfig()
     
-    for attempt in range(max_retries):
+    for attempt in range(backoff_config.max_retries):
         try:
             return client.get_usage_range(site_id, window_start, window_end, resolution=resolution)
         except (AmberAPIError, Exception) as e:
@@ -208,20 +299,26 @@ def fetch_usage_with_retry(
             elif isinstance(e, (ConnectionError, TimeoutError)):
                 is_retryable = True
             
-            if is_retryable and attempt < max_retries - 1:
+            if is_retryable and attempt < backoff_config.max_retries - 1:
+                retry_after = retry_after_delay(e) if is_rate_limit_error(e) else None
+                delay = retry_after if retry_after is not None else backoff_delay(attempt, backoff_config, jitter_fn)
                 logger.warning(
-                    f"Attempt {attempt + 1}/{max_retries} failed for {window_start} to {window_end}: {e}. "
-                    f"Retrying in {backoff:.1f}s..."
+                    f"Attempt {attempt + 1}/{backoff_config.max_retries} failed for "
+                    f"{window_start} to {window_end}: {e}. Retrying in {delay:.1f}s..."
                 )
-                time.sleep(backoff)
-                backoff *= 2  # Exponential backoff
+                if retry_after is not None:
+                    logger.warning(
+                        f"Respecting Retry-After={retry_after:.1f}s for "
+                        f"{window_start} to {window_end}"
+                    )
+                sleep_fn(delay)
             else:
                 # Not retryable or last attempt
                 logger.error(f"Failed to fetch usage after {attempt + 1} attempts: {e}")
                 raise
     
     # Should never reach here, but just in case
-    raise AmberAPIError(f"Failed to fetch usage after {max_retries} attempts")
+    raise AmberAPIError(f"Failed to fetch usage after {backoff_config.max_retries} attempts")
 
 
 def fetch_usage_adaptive(
@@ -231,7 +328,10 @@ def fetch_usage_adaptive(
     window_end: date,
     initial_chunk_days: int,
     min_chunk_days: int,
-    resolution: Optional[str] = None
+    resolution: Optional[str] = None,
+    backoff_config: Optional[BackoffConfig] = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    jitter_fn: Callable[[float, float], float] = random.uniform,
 ) -> List[Dict[str, Any]]:
     """
     Fetch usage with adaptive chunking: recursively split window if too large.
@@ -260,7 +360,16 @@ def fetch_usage_adaptive(
     # If window fits in initial chunk, try direct fetch
     if window_days <= initial_chunk_days:
         try:
-            return fetch_usage_with_retry(client, site_id, window_start, window_end, resolution)
+            return fetch_usage_with_retry(
+                client,
+                site_id,
+                window_start,
+                window_end,
+                resolution,
+                backoff_config=backoff_config,
+                sleep_fn=sleep_fn,
+                jitter_fn=jitter_fn,
+            )
         except AmberAPIError as e:
             if is_chunk_too_large_error(e) and window_days > min_chunk_days:
                 # Window is too large, need to split
@@ -272,7 +381,16 @@ def fetch_usage_adaptive(
     # Window is too large or fetch failed due to size, split it
     if window_days <= min_chunk_days:
         # Already at minimum, try one more time
-        return fetch_usage_with_retry(client, site_id, window_start, window_end, resolution)
+        return fetch_usage_with_retry(
+            client,
+            site_id,
+            window_start,
+            window_end,
+            resolution,
+            backoff_config=backoff_config,
+            sleep_fn=sleep_fn,
+            jitter_fn=jitter_fn,
+        )
     
     # Split window in half and recursively fetch both halves
     mid_date = window_start + timedelta(days=window_days // 2)
@@ -287,7 +405,10 @@ def fetch_usage_adaptive(
     try:
         first_half = fetch_usage_adaptive(
             client, site_id, window_start, mid_date - timedelta(days=1),
-            initial_chunk_days, min_chunk_days, resolution
+            initial_chunk_days, min_chunk_days, resolution,
+            backoff_config=backoff_config,
+            sleep_fn=sleep_fn,
+            jitter_fn=jitter_fn,
         )
         results.extend(first_half)
     except Exception as e:
@@ -298,7 +419,10 @@ def fetch_usage_adaptive(
     try:
         second_half = fetch_usage_adaptive(
             client, site_id, mid_date, window_end,
-            initial_chunk_days, min_chunk_days, resolution
+            initial_chunk_days, min_chunk_days, resolution,
+            backoff_config=backoff_config,
+            sleep_fn=sleep_fn,
+            jitter_fn=jitter_fn,
         )
         results.extend(second_half)
     except Exception as e:
@@ -353,6 +477,36 @@ def main() -> int:
         default="general",
         help="Channel type (default: general)"
     )
+    parser.add_argument(
+        "--request-delay-seconds",
+        type=float,
+        default=1.0,
+        help="Delay between successful chunk requests in seconds (default: 1.0)"
+    )
+    parser.add_argument(
+        "--base-backoff-seconds",
+        type=float,
+        default=2.0,
+        help="Base exponential backoff delay in seconds (default: 2.0)"
+    )
+    parser.add_argument(
+        "--max-backoff-seconds",
+        type=float,
+        default=300.0,
+        help="Maximum backoff delay in seconds (default: 300.0)"
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=5,
+        help="Maximum fetch retry attempts per window (default: 5)"
+    )
+    parser.add_argument(
+        "--jitter-seconds",
+        type=float,
+        default=0.5,
+        help="Random jitter added to fallback backoff delays in seconds (default: 0.5)"
+    )
     
     args = parser.parse_args()
     
@@ -363,6 +517,29 @@ def main() -> int:
     if args.chunk_days < args.min_chunk_days:
         logger.error("--chunk-days must be >= --min-chunk-days")
         return 1
+
+    if args.request_delay_seconds < 0:
+        logger.error("--request-delay-seconds must be >= 0")
+        return 1
+    if args.base_backoff_seconds < 0:
+        logger.error("--base-backoff-seconds must be >= 0")
+        return 1
+    if args.max_backoff_seconds < args.base_backoff_seconds:
+        logger.error("--max-backoff-seconds must be >= --base-backoff-seconds")
+        return 1
+    if args.max_retries < 1:
+        logger.error("--max-retries must be >= 1")
+        return 1
+    if args.jitter_seconds < 0:
+        logger.error("--jitter-seconds must be >= 0")
+        return 1
+
+    backoff_config = BackoffConfig(
+        max_retries=args.max_retries,
+        base_backoff_seconds=args.base_backoff_seconds,
+        max_backoff_seconds=args.max_backoff_seconds,
+        jitter_seconds=args.jitter_seconds,
+    )
     
     # Load local fallback env file for development. On Pi, systemd provides env.
     load_dotenv(project_root / ".env.local", override=False)
@@ -411,19 +588,24 @@ def main() -> int:
         
         # Process in chunks
         current_start = actual_start
+        active_chunk_days = args.chunk_days
         total_rows = 0
         total_upserted = 0
         skipped_windows = 0
+        rate_limited_windows = 0
         
         while current_start <= args.end:
             # Calculate chunk end (exclusive, so we use < for comparison)
-            chunk_end_date = min(current_start + timedelta(days=args.chunk_days), args.end + timedelta(days=1))
+            chunk_end_date = min(current_start + timedelta(days=active_chunk_days), args.end + timedelta(days=1))
             chunk_end_exclusive = chunk_end_date - timedelta(days=1)  # Make inclusive
             
             chunk_start_dt = datetime.combine(current_start, datetime.min.time()).replace(tzinfo=timezone.utc)
             chunk_end_dt = datetime.combine(chunk_end_exclusive, datetime.max.time()).replace(tzinfo=timezone.utc)
             
-            logger.info(f"Processing chunk: {current_start} to {chunk_end_exclusive} (inclusive)")
+            logger.info(
+                f"Processing chunk: {current_start} to {chunk_end_exclusive} "
+                f"(inclusive, active_chunk_days={active_chunk_days})"
+            )
             
             chunk_start_time = time.time()
             
@@ -434,8 +616,9 @@ def main() -> int:
                     site_id,
                     current_start,
                     chunk_end_exclusive,
-                    args.chunk_days,
-                    args.min_chunk_days
+                    active_chunk_days,
+                    args.min_chunk_days,
+                    backoff_config=backoff_config,
                 )
                 
                 if not raw_usage:
@@ -496,7 +679,41 @@ def main() -> int:
                     f"normalized {len(rows)} rows, upserted {upserted_count} rows "
                     f"in {chunk_duration:.1f}s"
                 )
+
+                restored = restored_chunk_days(active_chunk_days, args.chunk_days)
+                if restored != active_chunk_days:
+                    logger.info(
+                        f"Restoring active chunk size after success: "
+                        f"{active_chunk_days} -> {restored} days"
+                    )
+                    active_chunk_days = restored
                 
+            except AmberAPIError as e:
+                if is_rate_limit_error(e):
+                    rate_limited_windows += 1
+                    reduced = reduced_chunk_days(active_chunk_days, args.min_chunk_days)
+                    logger.warning(
+                        f"Rate limited for {current_start} to {chunk_end_exclusive} after "
+                        f"{args.max_retries} attempts. active_chunk_days={active_chunk_days}, "
+                        f"next_chunk_days={reduced}, retrying same window"
+                    )
+                    if reduced == active_chunk_days:
+                        logger.error(
+                            f"Still rate limited at minimum chunk size ({args.min_chunk_days} day). "
+                            "Aborting without marking the window as skipped."
+                        )
+                        return 1
+                    active_chunk_days = reduced
+                    continue
+
+                logger.error(f"Error processing chunk {current_start} to {chunk_end_exclusive}: {e}")
+                import traceback
+                traceback.print_exc()
+                # Skip this window and continue
+                skipped_windows += 1
+                if skipped_windows >= 5:
+                    logger.error("Too many skipped windows, aborting")
+                    return 1
             except Exception as e:
                 logger.error(f"Error processing chunk {current_start} to {chunk_end_exclusive}: {e}")
                 import traceback
@@ -510,10 +727,13 @@ def main() -> int:
             
             # Move to next chunk
             current_start = chunk_end_date
+            if current_start <= args.end and args.request_delay_seconds > 0:
+                logger.info(f"Sleeping {args.request_delay_seconds:.1f}s before next chunk")
+                time.sleep(args.request_delay_seconds)
         
         logger.info(
             f"Backfill complete: {total_rows} rows fetched, {total_upserted} rows upserted, "
-            f"{skipped_windows} windows skipped"
+            f"{skipped_windows} windows skipped, {rate_limited_windows} rate-limited retries"
         )
         return 0
         
