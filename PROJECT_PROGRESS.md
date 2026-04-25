@@ -1,5 +1,27 @@
 # Project Progress
 
+## 2026-04-25
+
+### Restart audit, GitHub hygiene, and structure cleanup
+
+* Verified and merged the two open draft PRs:
+  * PR #17: Amber usage Retry-After throttling/backoff (`33 passed` before merge).
+  * PR #18: Powerpal manifest diagnostics and usage reconciliation tooling (`35 passed` before merge).
+* Added pytest CI workflow at `.github/workflows/pytest.yml`.
+* Added tracked roadmap summary at `docs/roadmap.md`; GitHub issues remain the durable backlog and `TODO_v2.md` stays ignored local scratch space.
+* Added `scripts/verify_setup.py` for smoke checks across SQLite cache, dashboard endpoints, optional Supabase connectivity, and optional Pi systemd units.
+* Moved the active Amber client into `src/home_energy_analysis/ingestion/` and removed tracked duplicate legacy ingestion/processing modules.
+* Ignored scratch presentation exports (`docs/presentations/test_*.pptx`) while preserving final presentation deliverables.
+* Cleanup:
+  * Deleted stale local branches `codex/digital-twin-dashboard-polish` and `feature/pi-sqlite-cache`.
+  * Deleted matching stale remote branches.
+  * Kept `stash@{0}` for now; inspection showed mostly redundant January backoff/keepalive work, but it was not dropped.
+* Audit results:
+  * Local tests: `.venv/bin/python -m pytest -q` -> `40 passed`.
+  * Local smoke: `.venv/bin/python scripts/verify_setup.py --skip-endpoints --skip-supabase` -> passed SQLite schema/init smoke with empty local cache.
+  * Supabase smoke: `.venv/bin/python scripts/test_supabase_db.py` -> failed with `Tenant or user not found`, so live Supabase reconciliation remains blocked by connection configuration.
+  * Pi read-only audit: SSH to `home-energy-pi` timed out and ping to `192.168.5.210` had 100% packet loss, so live Pi service state was not confirmed from this Mac.
+
 ## 2026-04-13
 
 ### Usage baseline consolidation and reconciliation tooling

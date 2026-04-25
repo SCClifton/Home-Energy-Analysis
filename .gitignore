@@ -28,6 +28,9 @@ dist/
 # Jupyter
 .ipynb_checkpoints/
 
+# Local roadmap scratchpad; tracked planning lives in GitHub issues and docs/roadmap.md
+TODO_v2.md
+
 # Local cache / runtime data
 data_local/
 *.sqlite
@@ -47,4 +50,6 @@ results/
 # Logs
 logs/
 *.log
-TODO_v2.md
+
+# Presentation export scratch files
+docs/presentations/test_*.pptx

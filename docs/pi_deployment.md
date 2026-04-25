@@ -49,6 +49,8 @@ Verified working after reboot (2026-01-05):
 - X11 is in use (LightDM launches `/usr/lib/xorg/Xorg :0`).
 - Screen blanking is disabled via `raspi-config`.
 
+Restart audit note (2026-04-25): the documented SSH alias/IP (`home-energy-pi`, `192.168.5.210`) was not reachable from the Mac running the repo audit. SSH timed out and ping had 100% packet loss. Confirm the current DHCP lease or reconnect locally at the Pi before assuming service state from this document is current.
+
 ## Repo layout on the Pi
 
 - Repo location: `/home/sam/repos/Home-Energy-Analysis`
@@ -122,6 +124,8 @@ Health checks:
 ```bash
 curl -fsS http://127.0.0.1:5050/ | head
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
+cd ~/repos/Home-Energy-Analysis
+python scripts/verify_setup.py --pi-systemd
 ```
 
 Note on `/api/health`:
