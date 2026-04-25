@@ -2,6 +2,36 @@
 
 ## 2026-04-25
 
+### Annual solar, battery, and efficiency analysis dashboard
+
+* Added annual purchase-decision modelling for solar, battery, and home efficiency analysis.
+* New annual analysis module runs conservative scenario sweeps across solar sizes (`0, 6.6, 8, 10, 12, 15 kW`) and battery sizes (`0, 5, 10, 13.5, 20, 30 kWh`) for base and optimizer dispatch.
+* Added conservative financial outputs: year-1 saving, installed cost after rebates, 15-year cashflow, net benefit, IRR, payback, effective rate, grid reduction, self-supply, exports, monthly source mix, and sensitivity rows.
+* Added load-shifting and efficiency pattern detection from interval data: baseload, evening/midday shift opportunity, high-power spikes, weekday/weekend difference, weather correlation, and worst-cost days.
+* Added cache-backed SQLite `analysis_runs` table plus storage helpers so annual outputs are offline-first and dashboard-safe.
+* Added Flask APIs:
+  * `/api/analysis/scenarios`
+  * `/api/analysis/recommendation`
+  * `/api/analysis/load-shift`
+  * `/api/analysis/data-quality`
+* Added `/analysis` dashboard page with recommendation, scenario table, financial sensitivity, cashflow, monthly energy source, bill impact, load-shift opportunities, and data-quality panels.
+* Added touch swipe navigation across `/`, `/simulation`, and `/analysis` for the Raspberry Pi kiosk display.
+* Added commands:
+  * `scripts/modelling_preflight.py --year 2025`
+  * `scripts/run_annual_analysis.py --year 2025 --refresh-weather`
+* Added Pi annual analysis systemd service/timer:
+  * `pi/systemd/home-energy-annual-analysis.service`
+  * `pi/systemd/home-energy-annual-analysis.timer`
+  * `pi/update.sh` now installs/enables the timer and triggers an analysis refresh after cache sync.
+* Powerpal remains CSV/export-link only; no direct BLE integration. Powerpal is treated as import/consumption data, not solar export metering.
+* Updated README and status report with analysis commands, endpoints, and modelling assumptions.
+* Validation:
+  * `.venv/bin/python -m pytest` -> `46 passed`.
+  * `bash -n pi/update.sh` -> passed.
+  * Temporary-cache preflight smoke returned expected missing-data warnings and did not crash when Supabase DNS was unavailable in the sandbox.
+
+## 2026-04-25
+
 ### Restart audit, GitHub hygiene, and structure cleanup
 
 * Verified and merged the two open draft PRs:

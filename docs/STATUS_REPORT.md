@@ -8,10 +8,26 @@
 - Powerpal minute CSV download and load pipeline works with DST-safe parsing (`scripts/pull_powerpal_minute_csv.py`, `scripts/load_powerpal_minute_to_supabase.py`).
 - Digital twin simulation pipeline is implemented with backtest + live modes, writing interval + summary outputs to SQLite cache tables (`analysis/src/scenario/`, `scripts/run_scenario_simulation.py`, `scripts/run_simulation_live.py`).
 - Simulation dashboard page and APIs are implemented (`/simulation`, `/api/simulation/status`, `/api/simulation/intervals`, `/api/simulation/flow`).
+- Annual purchase-decision analysis is implemented with cache-backed APIs and `/analysis` dashboard page for solar/battery sizing, financial outputs, load shifting, and data quality.
 - GitHub is the durable backlog; `docs/roadmap.md` is the tracked summary and local `TODO_v2.md` is ignored.
 - Pytest CI is defined in `.github/workflows/pytest.yml`.
 
 ## What’s been implemented recently
+- Added annual solar/battery decision modelling:
+  - Scenario sweeps for configured solar and battery sizes across base and optimizer dispatch.
+  - Conservative financial metrics including payback, IRR, effective rate, 15-year cashflow, and net benefit.
+  - Load-shifting and energy-efficiency pattern detection from interval usage and prices.
+  - Cache-backed analysis payloads in SQLite (`analysis_runs`) and Flask APIs under `/api/analysis/*`.
+  - New `/analysis` dashboard page for recommendations, scenario comparison, sensitivity, monthly source mix, bill impact, load-shift opportunities, and data quality.
+- Added touch swipe navigation across the Pi kiosk pages (`/`, `/simulation`, `/analysis`).
+- Added Pi annual analysis service/timer and update flow:
+  - `pi/systemd/home-energy-annual-analysis.service`
+  - `pi/systemd/home-energy-annual-analysis.timer`
+  - `pi/update.sh` installs/enables the timer and triggers a run after cache refresh.
+- Added annual modelling commands:
+  - `scripts/modelling_preflight.py --year 2025`
+  - `scripts/run_annual_analysis.py --year 2025 --refresh-weather`
+- Added annual analysis automated coverage (`tests/test_annual_analysis.py`, `tests/test_analysis_endpoint.py`) and verified full suite passing (`46 passed`).
 - Merged PR #17: Amber usage backfill now handles HTTP 429 with Retry-After aware throttling, backoff, and adaptive chunk sizing.
 - Merged PR #18: Powerpal loader now supports manifest dry runs with coverage diagnostics, and `scripts/compare_usage_sources.py` compares Powerpal vs Amber daily usage totals.
 - Added `scripts/verify_setup.py` for local/Pi smoke checks covering SQLite cache, dashboard endpoints, optional Supabase connectivity, and optional systemd status.
@@ -48,6 +64,8 @@
 
 ## Known issues and limitations
 - Powerpal minute CSV exports have historical gaps (e.g., Oct–Dec 2024) and tokens are short-lived (manual refresh required).
+- Annual analysis recommendations are only as good as the loaded usage/price/irradiance coverage; use `scripts/modelling_preflight.py --year 2025` before relying on purchase decisions.
+- Annual PV output uses modelled Open-Meteo irradiance near Vaucluse, not measured rooftop generation or roof-shading geometry.
 - Local Supabase smoke testing still fails with `Tenant or user not found`; the configured `SUPABASE_DB_URL` needs refresh before live Supabase loads/reconciliation.
 - The 2026-04-25 read-only Pi audit could not reach `home-energy-pi` / `192.168.5.210` from this Mac (SSH timeout, ping 100% packet loss). The dashboard may still be running locally on the Pi, but LAN reachability/service state needs confirmation.
 - Simulation weather refresh depends on Open-Meteo network reachability; fallback is cached irradiance rows only.
@@ -60,15 +78,15 @@
 - Use `scripts/verify_setup.py --pi-systemd` on the Pi after pulling this branch/merge.
 
 ### P1
-- Forward sync workflow for Powerpal and Amber (weekly refresh cadence and documentation).
+- Forward sync workflow for Powerpal and Amber (weekly refresh cadence and documentation beyond the current CSV-link scripts).
 - Dashboard offline/stale UI indicators wired to existing API flags.
 - Architecture/API/data model documentation pass.
 
 ### P2
-- EV/V2H extensions and richer financial outputs on top of the shipped simulation baseline.
+- EV/V2H extensions and rooftop geometry/shading inputs on top of the shipped annual analysis baseline.
 - Replace Flask dev server with gunicorn on Pi.
 - Evaluate open metering hardware and document decision.
-- Scenario unit tests and stronger validation.
+- Stronger financial validation against installer quotes and external calculators.
 - Architecture and API documentation pass.
 
 ## Recommended next step
@@ -77,6 +95,7 @@ Restore Supabase and Pi runtime visibility before new feature work.
 - Refresh the local/Pi `SUPABASE_DB_URL` and rerun `.venv/bin/python scripts/test_supabase_db.py`.
 - Confirm the Pi's current IP/SSH alias, then run `python scripts/verify_setup.py --pi-systemd` on the Pi.
 - Once those pass, run `scripts/compare_usage_sources.py` for the 2025 overlap window and use the result to prioritize dashboard/backend fixes.
+- Then run `python scripts/modelling_preflight.py --year 2025` and `python scripts/run_annual_analysis.py --year 2025 --refresh-weather` to populate `/analysis`.
 
 ## Quick commands cheat sheet
 - How to run locally

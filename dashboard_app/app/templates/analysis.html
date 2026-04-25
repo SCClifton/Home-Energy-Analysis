@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home Energy Analysis</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='analysis.css') }}">
+</head>
+<body>
+  <div class="analysis-shell">
+    <header class="analysis-header">
+      <div>
+        <div class="analysis-brand">Home Energy Analysis</div>
+        <div class="analysis-subbrand">Solar, battery, and efficiency decision model</div>
+      </div>
+      <nav class="nav-links" aria-label="Main">
+        <a class="nav-link" href="/">Dashboard</a>
+        <a class="nav-link" href="/simulation">Simulation</a>
+        <a class="nav-link active" href="/analysis">Analysis</a>
+      </nav>
+      <div id="analysis-stamp" class="analysis-stamp">Waiting for cached model</div>
+    </header>
+
+    <main class="analysis-main">
+      <section class="hero-band">
+        <div>
+          <div class="eyebrow">Recommended system</div>
+          <h1 id="rec-title">No cached annual analysis</h1>
+          <p id="rec-copy">Run the annual analysis job to populate recommendations from your real interval data.</p>
+        </div>
+        <div class="hero-kpis">
+          <div class="kpi">
+            <span>Year 1 saving</span>
+            <strong id="kpi-saving">$0</strong>
+          </div>
+          <div class="kpi">
+            <span>Payback</span>
+            <strong id="kpi-payback">-- yrs</strong>
+          </div>
+          <div class="kpi">
+            <span>15-year benefit</span>
+            <strong id="kpi-benefit">$0</strong>
+          </div>
+          <div class="kpi">
+            <span>Effective rate</span>
+            <strong id="kpi-rate">-- c/kWh</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid two">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Scenario Comparison</h2>
+            <span class="panel-chip">Base dispatch</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Solar</th>
+                  <th>Battery</th>
+                  <th>Saving</th>
+                  <th>Cost</th>
+                  <th>Payback</th>
+                  <th>Grid red.</th>
+                </tr>
+              </thead>
+              <tbody id="scenario-rows"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Financial Sensitivity</h2>
+            <span class="panel-chip">Conservative</span>
+          </div>
+          <div id="sensitivity-list" class="list"></div>
+          <div class="chart" id="cashflow-chart" role="img" aria-label="15-year cumulative cashflow chart"></div>
+        </article>
+      </section>
+
+      <section class="grid two">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Monthly Energy Source</h2>
+            <span class="panel-chip">Recommended</span>
+          </div>
+          <div id="monthly-chart" class="bar-chart"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Bill Impact</h2>
+            <span class="panel-chip">Year 1</span>
+          </div>
+          <div id="bill-impact" class="bill-grid"></div>
+        </article>
+      </section>
+
+      <section class="grid two">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Load Shift Opportunities</h2>
+            <span class="panel-chip">Pattern detected</span>
+          </div>
+          <div id="opportunity-list" class="list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Data Quality & Assumptions</h2>
+            <span id="quality-chip" class="panel-chip">Unknown</span>
+          </div>
+          <div id="quality-list" class="quality-list"></div>
+          <p id="assumption-note" class="assumption-note"></p>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='analysis.js') }}"></script>
+  <script src="{{ url_for('static', filename='swipe_nav.js') }}"></script>
+</body>
+</html>

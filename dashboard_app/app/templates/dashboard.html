@@ -25,6 +25,7 @@
         <nav class="nav-links" aria-label="Main">
           <a class="nav-link active" href="/">Dashboard</a>
           <a class="nav-link" href="/simulation">Simulation</a>
+          <a class="nav-link" href="/analysis">Analysis</a>
         </nav>
         <span class="clock" id="clock">--:--</span>
       </div>
@@ -126,5 +127,6 @@
   </div>
 
   <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+  <script src="{{ url_for('static', filename='swipe_nav.js') }}"></script>
 </body>
 </html>

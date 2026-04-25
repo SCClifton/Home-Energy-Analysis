@@ -77,3 +77,18 @@ CREATE TABLE IF NOT EXISTS simulation_runs (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (scenario_id, controller_mode, run_mode)
 );
+
+CREATE TABLE IF NOT EXISTS analysis_runs (
+    analysis_id TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    generated_at TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    data_quality_json TEXT NOT NULL,
+    scenarios_json TEXT NOT NULL,
+    recommendations_json TEXT NOT NULL,
+    load_shift_json TEXT NOT NULL,
+    assumptions_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (analysis_id, year)
+);

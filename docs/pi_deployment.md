@@ -45,6 +45,7 @@ Verified working after reboot (2026-01-05):
 
 - `home-energy-dashboard.service` is enabled and running (Flask app on port 5050).
 - `home-energy-kiosk.service` is enabled and running (Chromium kiosk pointing to `http://127.0.0.1:5050/`).
+- Dashboard pages are available at `/`, `/simulation`, and `/analysis`; horizontal touch swipes cycle between them.
 - LightDM desktop auto-login is enabled for user `sam`.
 - X11 is in use (LightDM launches `/usr/lib/xorg/Xorg :0`).
 - Screen blanking is disabled via `raspi-config`.
@@ -70,6 +71,7 @@ Used by these systemd services via `EnvironmentFile=`:
 - `home-energy-supabase-forward-sync.service`
 - `home-energy-supabase-keepalive.service`
 - `home-energy-simulation.service`
+- `home-energy-annual-analysis.service`
 
 Keys:
 
@@ -80,6 +82,7 @@ Keys:
 - `RETENTION_DAYS`
 - `SQLITE_PATH` (typically under `/var/lib/home-energy-analysis`) and other runtime flags used by the dashboard and cache logic
 - Optional simulation knobs: `SIM_CONTROLLER`, `SIM_HISTORY_HOURS`, `SIM_FORECAST_HOURS`, `SIM_REFRESH_WEATHER`
+- Optional annual analysis knob: `ANALYSIS_YEAR` (defaults to `2025`)
 
 Example (no real secrets):
 
@@ -256,16 +259,50 @@ Run now:
 sudo systemctl start home-energy-simulation.service
 ```
 
+### 6) Annual purchase-decision analysis (system-level)
+
+Runs the annual solar, battery, and efficiency model and persists one cached payload in SQLite for the `/analysis` page and analysis APIs.
+
+Uses `EnvironmentFile=/etc/home-energy-analysis/dashboard.env`.
+
+Install:
+
+```bash
+sudo cp ~/repos/Home-Energy-Analysis/pi/systemd/home-energy-annual-analysis.service /etc/systemd/system/
+sudo cp ~/repos/Home-Energy-Analysis/pi/systemd/home-energy-annual-analysis.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now home-energy-annual-analysis.timer
+```
+
+Check logs:
+
+```bash
+sudo systemctl status home-energy-annual-analysis.service --no-pager -l
+sudo systemctl status home-energy-annual-analysis.timer --no-pager -l
+journalctl -u home-energy-annual-analysis.service -n 80 --no-pager
+```
+
+Run now:
+
+```bash
+cd ~/repos/Home-Energy-Analysis
+python scripts/modelling_preflight.py --year "${ANALYSIS_YEAR:-2025}"
+sudo systemctl start home-energy-annual-analysis.service
+curl -fsS http://127.0.0.1:5050/api/analysis/data-quality | python -m json.tool
+```
+
 ## Verify it's working
 
 ```bash
 sudo systemctl status home-energy-dashboard.service --no-pager -l
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
 curl -fsS http://127.0.0.1:5050/api/simulation/status | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/analysis/data-quality | python -m json.tool
 sudo systemctl list-timers --all | grep home-energy
 journalctl -u home-energy-supabase-forward-sync.service -n 80 --no-pager
 journalctl -u home-energy-supabase-keepalive.service -n 50 --no-pager
 journalctl -u home-energy-simulation.service -n 50 --no-pager
+journalctl -u home-energy-annual-analysis.service -n 50 --no-pager
 ```
 
 Dashboard endpoint checks (recommended after updates):
@@ -276,12 +313,15 @@ curl -fsS http://127.0.0.1:5050/api/forecast?hours=3 | python -m json.tool
 curl -fsS http://127.0.0.1:5050/api/totals | python -m json.tool
 curl -fsS http://127.0.0.1:5050/api/simulation/status | python -m json.tool
 curl -fsS "http://127.0.0.1:5050/api/simulation/intervals?window=today" | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/analysis/scenarios | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/analysis/recommendation | python -m json.tool
 ```
 
 Interpretation notes:
 
 - `CACHED PRICE` indicates the dashboard is serving cached price intervals.
 - `/api/totals` reflects only cached usage rows with `cost_aud`.
+- `/analysis` reflects the latest completed annual analysis run; if it says missing, run `home-energy-annual-analysis.service`.
 - If Amber usage is delayed, MTD may show delayed/lagging context or `—` if no current-month usage is cached.
 - This is expected behavior for offline-first operation and should not be treated as a dashboard crash.
 
@@ -355,6 +395,7 @@ sudo systemctl status home-energy-dashboard.service --no-pager -l
 systemctl --user status home-energy-kiosk.service --no-pager -l
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
 curl -fsS http://127.0.0.1:5050/api/totals | python -m json.tool
+curl -fsS http://127.0.0.1:5050/api/analysis/data-quality | python -m json.tool
 ```
 
 Recommended update sequence from Mac -> GitHub -> Pi:

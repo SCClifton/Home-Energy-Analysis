@@ -1012,10 +1012,146 @@ def create_app() -> Flask:
             }
         )
 
+    def _analysis_year() -> int:
+        try:
+            return int(request.args.get("year", "2025"))
+        except (TypeError, ValueError):
+            return 2025
+
+    def _get_analysis_payload(year: int):
+        cache_path = _get_cache_path()
+        return sqlite_cache.get_latest_analysis_run(cache_path, year)
+
+    @app.get("/api/analysis/scenarios")
+    def get_analysis_scenarios():
+        """Return cached annual scenario sweep results."""
+        year = _analysis_year()
+        run = _get_analysis_payload(year)
+        if not run:
+            return jsonify(
+                {
+                    "status": "missing",
+                    "year": year,
+                    "generated_at": None,
+                    "scenarios": [],
+                    "assumptions": {},
+                    "message": "No cached annual analysis run. Run scripts/run_annual_analysis.py.",
+                }
+            )
+
+        dispatch = request.args.get("dispatch")
+        scenarios = run.get("scenarios", [])
+        if dispatch:
+            scenarios = [row for row in scenarios if row.get("dispatch_mode") == dispatch]
+
+        return jsonify(
+            {
+                "status": "ok",
+                "year": run["year"],
+                "generated_at": run["generated_at"],
+                "window_start": run["window_start"],
+                "window_end": run["window_end"],
+                "scenarios": scenarios,
+                "assumptions": run.get("assumptions", {}),
+                "updated_at": run.get("updated_at"),
+            }
+        )
+
+    @app.get("/api/analysis/recommendation")
+    def get_analysis_recommendation():
+        """Return cached annual recommendation for the requested goal."""
+        year = _analysis_year()
+        goal = request.args.get("goal", "lowest_cost")
+        allowed = {"lowest_cost", "fastest_payback", "self_sufficiency"}
+        if goal not in allowed:
+            goal = "lowest_cost"
+
+        run = _get_analysis_payload(year)
+        if not run:
+            return jsonify(
+                {
+                    "status": "missing",
+                    "year": year,
+                    "goal": goal,
+                    "recommendation": None,
+                    "sensitivity": [],
+                    "message": "No cached annual analysis run. Run scripts/run_annual_analysis.py.",
+                }
+            )
+
+        recommendations = run.get("recommendations", {})
+        return jsonify(
+            {
+                "status": "ok",
+                "year": run["year"],
+                "goal": goal,
+                "generated_at": run["generated_at"],
+                "recommendation": recommendations.get(goal),
+                "recommendations": recommendations,
+                "sensitivity": recommendations.get("sensitivity", []),
+                "assumptions": run.get("assumptions", {}),
+            }
+        )
+
+    @app.get("/api/analysis/load-shift")
+    def get_analysis_load_shift():
+        """Return cached load-shifting and efficiency opportunities."""
+        year = _analysis_year()
+        run = _get_analysis_payload(year)
+        if not run:
+            return jsonify(
+                {
+                    "status": "missing",
+                    "year": year,
+                    "load_shift": {"status": "missing", "opportunities": [], "metrics": {}, "worst_days": []},
+                    "message": "No cached annual analysis run. Run scripts/run_annual_analysis.py.",
+                }
+            )
+
+        return jsonify(
+            {
+                "status": "ok",
+                "year": run["year"],
+                "generated_at": run["generated_at"],
+                "load_shift": run.get("load_shift", {}),
+            }
+        )
+
+    @app.get("/api/analysis/data-quality")
+    def get_analysis_data_quality():
+        """Return cached annual modelling data-quality checks."""
+        year = _analysis_year()
+        run = _get_analysis_payload(year)
+        if not run:
+            return jsonify(
+                {
+                    "status": "missing",
+                    "year": year,
+                    "data_quality": {
+                        "ready": False,
+                        "warnings": ["No cached annual analysis run. Run scripts/run_annual_analysis.py."],
+                    },
+                }
+            )
+
+        return jsonify(
+            {
+                "status": "ok",
+                "year": run["year"],
+                "generated_at": run["generated_at"],
+                "data_quality": run.get("data_quality", {}),
+            }
+        )
+
     @app.get("/")
     def index():
         """Home page with kiosk-style dashboard."""
         return render_template("dashboard.html")
+
+    @app.get("/analysis")
+    def analysis():
+        """Annual solar, battery, and efficiency decision dashboard."""
+        return render_template("analysis.html")
 
     @app.get("/simulation")
     def simulation():

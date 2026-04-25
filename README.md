@@ -218,6 +218,43 @@ python scripts/run_scenario_simulation.py \
 - `GET /api/simulation/intervals?window=today|mtd|next24h`
 - `GET /simulation` (dashboard page)
 
+## Annual purchase-decision analysis
+
+The `/analysis` page shows cache-backed annual solar, battery, and efficiency modelling.
+It is separate from the live `/simulation` page so heavy annual analysis can run offline
+or on a schedule without blocking the kitchen dashboard.
+On the Pi touchscreen, horizontal swipes cycle between `/`, `/simulation`, and `/analysis`.
+
+### Generate the cached analysis
+
+```bash
+python scripts/modelling_preflight.py --year 2025
+python scripts/run_annual_analysis.py --year 2025 --refresh-weather
+```
+
+The preflight command is read-only and reports coverage for usage, price, and irradiance
+inputs. The annual analysis command writes one JSON payload into SQLite for cache-first
+API/dashboard reads.
+
+On the Pi, `pi/update.sh` installs/enables `home-energy-annual-analysis.timer`,
+which runs the same analysis command daily and triggers an immediate run after update.
+
+### Analysis API endpoints
+
+- `GET /api/analysis/scenarios?year=2025`
+- `GET /api/analysis/recommendation?year=2025&goal=lowest_cost|fastest_payback|self_sufficiency`
+- `GET /api/analysis/load-shift?year=2025`
+- `GET /api/analysis/data-quality?year=2025`
+
+### Analysis assumptions
+
+- Powerpal remains an app CSV/export-link workflow only; no direct BLE integration.
+- Powerpal is treated as import/consumption data only, not solar export metering.
+- Solar sizes: `0, 6.6, 8, 10, 12, 15 kW`.
+- Battery sizes: `0, 5, 10, 13.5, 20, 30 kWh`.
+- Conservative export value defaults to `2c/kWh`.
+- Vaucluse irradiance is modelled from Open-Meteo historical weather and is not measured rooftop output.
+
 ## Supabase
 
 ### Setup

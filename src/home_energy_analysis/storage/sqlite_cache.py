@@ -791,6 +791,104 @@ def get_latest_simulation_run(
         conn.close()
 
 
+def upsert_analysis_run(db_path: str, run_row: Dict[str, Any]) -> None:
+    """Upsert the latest annual analysis payload for cache-first dashboard reads."""
+    updated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def as_json(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        return json.dumps(value, sort_keys=True)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO analysis_runs (
+                analysis_id, year, generated_at, window_start, window_end,
+                data_quality_json, scenarios_json, recommendations_json,
+                load_shift_json, assumptions_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (analysis_id, year)
+            DO UPDATE SET
+                generated_at = excluded.generated_at,
+                window_start = excluded.window_start,
+                window_end = excluded.window_end,
+                data_quality_json = excluded.data_quality_json,
+                scenarios_json = excluded.scenarios_json,
+                recommendations_json = excluded.recommendations_json,
+                load_shift_json = excluded.load_shift_json,
+                assumptions_json = excluded.assumptions_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                run_row.get("analysis_id", "solar_battery_efficiency"),
+                int(run_row["year"]),
+                run_row["generated_at"],
+                run_row["window_start"],
+                run_row["window_end"],
+                as_json(run_row.get("data_quality", {})),
+                as_json(run_row.get("scenarios", [])),
+                as_json(run_row.get("recommendations", {})),
+                as_json(run_row.get("load_shift", {})),
+                as_json(run_row.get("assumptions", {})),
+                updated_at,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_latest_analysis_run(
+    db_path: str,
+    year: int,
+    analysis_id: str = "solar_battery_efficiency",
+) -> Optional[Dict[str, Any]]:
+    """Fetch the latest cached annual analysis payload."""
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                analysis_id, year, generated_at, window_start, window_end,
+                data_quality_json, scenarios_json, recommendations_json,
+                load_shift_json, assumptions_json, updated_at
+            FROM analysis_runs
+            WHERE analysis_id = ? AND year = ?
+            LIMIT 1
+            """,
+            (analysis_id, int(year)),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+
+        def parse_json(value: str, fallback: Any) -> Any:
+            try:
+                return json.loads(value) if value else fallback
+            except json.JSONDecodeError:
+                return fallback
+
+        return {
+            "analysis_id": row[0],
+            "year": row[1],
+            "generated_at": row[2],
+            "window_start": row[3],
+            "window_end": row[4],
+            "data_quality": parse_json(row[5], {}),
+            "scenarios": parse_json(row[6], []),
+            "recommendations": parse_json(row[7], {}),
+            "load_shift": parse_json(row[8], {}),
+            "assumptions": parse_json(row[9], {}),
+            "updated_at": row[10],
+        }
+    finally:
+        conn.close()
+
+
 def prune_old_data(db_path: str, retention_days: int) -> int:
     """
     Delete rows older than the retention period.

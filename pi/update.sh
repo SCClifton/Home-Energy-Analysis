@@ -61,17 +61,29 @@ echo "=== Installing project in editable mode ==="
 "$venv_pip" install -e .
 
 echo "=== Restarting services (requires sudo) ==="
+if [[ -f "$repo_root/pi/systemd/home-energy-annual-analysis.service" ]]; then
+  sudo cp "$repo_root/pi/systemd/home-energy-annual-analysis.service" /etc/systemd/system/
+  sudo cp "$repo_root/pi/systemd/home-energy-annual-analysis.timer" /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now home-energy-annual-analysis.timer
+fi
 sudo systemctl restart home-energy-dashboard.service
 sudo systemctl restart home-energy-sync-cache.timer
 
 echo "=== Triggering immediate cache refresh ==="
 sudo systemctl start home-energy-sync-cache.service
+if systemctl list-unit-files home-energy-annual-analysis.service --no-legend | grep -q home-energy-annual-analysis.service; then
+  echo "=== Triggering annual analysis refresh ==="
+  sudo systemctl start home-energy-annual-analysis.service || true
+fi
 
 echo "=== Service status ==="
 echo -n "home-energy-dashboard.service: "
 systemctl is-active home-energy-dashboard.service || true
 echo -n "home-energy-sync-cache.timer: "
 systemctl is-active home-energy-sync-cache.timer || true
+echo -n "home-energy-annual-analysis.timer: "
+systemctl is-active home-energy-annual-analysis.timer || true
 
 echo "=== Health check ==="
 curl -fsS http://localhost:5050/api/health || true
