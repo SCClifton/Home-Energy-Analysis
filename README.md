@@ -107,6 +107,7 @@ Runtime environment is stored at `/etc/home-energy-analysis/dashboard.env` (not 
 
 Keys include `AMBER_TOKEN`, `AMBER_SITE_ID`, `SUPABASE_DB_URL`, `PORT`, `SQLITE_PATH`, `RETENTION_DAYS`, `DEBUG`.
 Simulation-specific optional keys: `SIM_CONTROLLER`, `SIM_HISTORY_HOURS`, `SIM_FORECAST_HOURS`, `SIM_REFRESH_WEATHER`.
+Powerpal refresh keys: `POWERPAL_DEVICE_ID`, `POWERPAL_TOKEN`, `POWERPAL_SAMPLE`.
 
 ## Local development quickstart (Mac)
 
@@ -306,9 +307,18 @@ Downloads 90-day windows from Powerpal:
 python scripts/pull_powerpal_minute_csv.py --start 2024-10-01 --end 2025-03-31
 ```
 
+You can also paste the app-generated CSV export URL for a one-off refresh without saving the token:
+
+```bash
+python scripts/refresh_powerpal_to_supabase.py \
+  --export-url "https://readings.powerpal.net/csv/v1/DEVICE?token=TOKEN&start=...&end=...&sample=1" \
+  --start 2025-01-01 \
+  --end 2025-12-31
+```
+
 Outputs CSVs to `data_raw/powerpal_minute/` with a manifest for tracking.
 
-Note: Powerpal tokens are short-lived and require manual refresh.
+Note: Powerpal's supported path is still app-generated CSV/export links. Do not use direct BLE access for v1.
 
 ### Load into Supabase
 
@@ -320,6 +330,16 @@ python scripts/load_powerpal_minute_to_supabase.py \
 ```
 
 The loader handles DST edge cases by treating timestamps as UTC. Inserts are idempotent (safe to rerun).
+
+### SQLite cache forward sync
+
+The Pi can also forward recent cached price/usage rows into Supabase with explicit `source='sqlite-cache'` provenance:
+
+```bash
+python scripts/sync_sqlite_to_supabase.py --days-back 7
+```
+
+`scripts/forward_sync_supabase.py` now runs this cache forwarder after the Amber API backfills unless `--skip-sqlite-cache` is supplied.
 
 ## Raspberry Pi deployment
 
@@ -337,6 +357,8 @@ Pi systemd services use `/etc/home-energy-analysis/dashboard.env`.
 | Supabase keepalive timer | `home-energy-supabase-keepalive.timer` | Daily keepalive |
 | Supabase forward sync service | `home-energy-supabase-forward-sync.service` | Daily forward sync of prices/usage |
 | Supabase forward sync timer | `home-energy-supabase-forward-sync.timer` | Daily forward sync schedule |
+| Powerpal refresh service | `home-energy-powerpal-refresh.service` | Weekly CSV-link download + Supabase load |
+| Powerpal refresh timer | `home-energy-powerpal-refresh.timer` | Weekly Powerpal refresh when configured |
 | Simulation live service | `home-energy-simulation.service` | Runs digital twin live-mode pipeline |
 | Simulation live timer | `home-energy-simulation.timer` | Every 5 minutes |
 | Kiosk script | `~/bin/home-energy-kiosk.sh` | Chromium launcher (waits for `/api/health`, launches fullscreen) |

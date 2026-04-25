@@ -47,6 +47,25 @@ def _run_backfill(script_path: Path, start_date: date, end_date: date, dry_run: 
     return result.returncode
 
 
+def _run_sqlite_sync(script_path: Path, days_back: int, dry_run: bool) -> int:
+    cmd = [
+        sys.executable,
+        str(script_path),
+        "--days-back",
+        str(days_back),
+    ]
+    if dry_run:
+        cmd.append("--dry-run")
+        logger.info("Dry run: would execute %s", " ".join(cmd))
+        return 0
+
+    logger.info("Running %s", " ".join(cmd))
+    result = subprocess.run(cmd, cwd=script_path.parent.parent, check=False)
+    if result.returncode != 0:
+        logger.error("Command failed with exit code %s", result.returncode)
+    return result.returncode
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Forward sync recent Amber prices and usage into Supabase",
@@ -68,6 +87,11 @@ def main() -> int:
         action="store_true",
         help="Log commands without writing to Supabase",
     )
+    parser.add_argument(
+        "--skip-sqlite-cache",
+        action="store_true",
+        help="Do not forward the local SQLite cache rows after API backfills",
+    )
 
     args = parser.parse_args()
 
@@ -86,14 +110,25 @@ def main() -> int:
 
     prices_script = project_root / "scripts" / "backfill_amber_prices_to_supabase.py"
     usage_script = project_root / "scripts" / "backfill_amber_usage_to_supabase.py"
+    sqlite_script = project_root / "scripts" / "sync_sqlite_to_supabase.py"
 
+    failures = 0
     result = _run_backfill(prices_script, start_date, end_date, args.dry_run)
     if result != 0:
-        return result
+        failures += 1
 
     result = _run_backfill(usage_script, start_date, end_date, args.dry_run)
     if result != 0:
-        return result
+        failures += 1
+
+    if not args.skip_sqlite_cache:
+        result = _run_sqlite_sync(sqlite_script, args.days_back, args.dry_run)
+        if result != 0:
+            failures += 1
+
+    if failures:
+        logger.error("Forward sync completed with %s failed step(s)", failures)
+        return 1
 
     logger.info("Forward sync complete")
     return 0

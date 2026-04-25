@@ -21,6 +21,7 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List
+from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 import requests
@@ -39,6 +40,41 @@ BASE_URL = "https://readings.powerpal.net/csv/v1"
 def parse_yyyy_mm_dd(s: str) -> date:
     """Parse YYYY-MM-DD date string."""
     return datetime.strptime(s, "%Y-%m-%d").date()
+
+
+def date_from_epoch_sydney(epoch_seconds: int) -> date:
+    """Convert epoch seconds to an Australia/Sydney local date."""
+    return datetime.fromtimestamp(epoch_seconds, tz=TZ).date()
+
+
+def parse_export_url(export_url: str) -> dict[str, object]:
+    """Extract device, token, sample, and optional date range from a Powerpal CSV URL."""
+    parsed = urlparse(export_url)
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) < 3 or path_parts[-3:-1] != ["csv", "v1"]:
+        raise ValueError("Powerpal export URL path must include /csv/v1/<device_id>")
+
+    device_id = path_parts[-1]
+    query = parse_qs(parsed.query)
+    token = query.get("token", [None])[0]
+    if not device_id or not token:
+        raise ValueError("Powerpal export URL must include device id and token")
+
+    result: dict[str, object] = {
+        "device_id": device_id,
+        "token": token,
+    }
+
+    sample = query.get("sample", [None])[0]
+    if sample:
+        result["sample"] = int(sample)
+
+    if query.get("start"):
+        result["start"] = date_from_epoch_sydney(int(query["start"][0]))
+    if query.get("end"):
+        result["end"] = date_from_epoch_sydney(int(query["end"][0]))
+
+    return result
 
 
 def epoch_start(d: date) -> int:
@@ -143,8 +179,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Download Powerpal minute-resolution CSV exports"
     )
-    parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD (Australia/Sydney)")
-    parser.add_argument("--end", required=True, help="End date YYYY-MM-DD (Australia/Sydney, inclusive)")
+    parser.add_argument("--start", help="Start date YYYY-MM-DD (Australia/Sydney)")
+    parser.add_argument("--end", help="End date YYYY-MM-DD (Australia/Sydney, inclusive)")
+    parser.add_argument("--export-url", default=None,
+                        help="Powerpal CSV export URL from the app; overrides POWERPAL_DEVICE_ID/TOKEN/SAMPLE for this run")
     parser.add_argument("--window-days", type=int, default=90,
                         help="Maximum days per download window (default: 90)")
     parser.add_argument("--out-dir", type=Path, default=Path("data_raw/powerpal_minute"),
@@ -154,10 +192,24 @@ def main() -> int:
     
     args = parser.parse_args()
     
+    export_values: dict[str, object] = {}
+    if args.export_url:
+        try:
+            export_values = parse_export_url(args.export_url)
+        except Exception as e:
+            print(f"ERROR: Could not parse --export-url: {e}", file=sys.stderr)
+            return 1
+
     # Get environment variables
     device_id = os.getenv("POWERPAL_DEVICE_ID")
     token = os.getenv("POWERPAL_TOKEN")
     sample_str = os.getenv("POWERPAL_SAMPLE", "1")
+
+    if export_values:
+        device_id = str(export_values["device_id"])
+        token = str(export_values["token"])
+        if "sample" in export_values:
+            sample_str = str(export_values["sample"])
     
     if not device_id or not token:
         print("ERROR: POWERPAL_DEVICE_ID and POWERPAL_TOKEN must be set in environment", file=sys.stderr)
@@ -170,8 +222,12 @@ def main() -> int:
         return 1
     
     # Parse dates
-    start = parse_yyyy_mm_dd(args.start)
-    end = parse_yyyy_mm_dd(args.end)
+    start = parse_yyyy_mm_dd(args.start) if args.start else export_values.get("start")
+    end = parse_yyyy_mm_dd(args.end) if args.end else export_values.get("end")
+
+    if not isinstance(start, date) or not isinstance(end, date):
+        print("ERROR: --start and --end are required unless --export-url includes start/end", file=sys.stderr)
+        return 1
     
     if start > end:
         print(f"ERROR: Start date {start} is after end date {end}", file=sys.stderr)

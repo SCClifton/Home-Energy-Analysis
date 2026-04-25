@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly Home Energy Powerpal CSV refresh
+
+[Timer]
+OnCalendar=Sun *-*-* 03:20:00
+Persistent=true
+Unit=home-energy-powerpal-refresh.service
+
+[Install]
+WantedBy=timers.target

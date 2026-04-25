@@ -2,6 +2,25 @@
 
 ## 2026-04-25
 
+### Pi data refresh hardening and Powerpal collection
+
+* Added `scripts/sync_sqlite_to_supabase.py` to forward recent SQLite cache rows into Supabase with explicit `source='sqlite-cache'` provenance.
+* Updated `scripts/forward_sync_supabase.py` so daily forward sync attempts Amber price backfill, Amber usage backfill, and SQLite cache forwarding before reporting failures.
+* Extended `scripts/pull_powerpal_minute_csv.py` to accept a Powerpal app-generated CSV export URL and extract device id, token, sample, and date range without storing the token.
+* Added `scripts/refresh_powerpal_to_supabase.py` as the Pi-friendly workflow for download + manifest load into Supabase.
+* Added weekly Powerpal refresh systemd units:
+  * `pi/systemd/home-energy-powerpal-refresh.service`
+  * `pi/systemd/home-energy-powerpal-refresh.timer`
+* Updated `pi/update.sh` to install/enable Supabase forward sync, Supabase keepalive, simulation, annual analysis, and Powerpal refresh timers.
+* Updated `README.md`, `docs/pi_deployment.md`, and `docs/STATUS_REPORT.md` with the Powerpal refresh and SQLite forwarding workflows.
+* Validation:
+  * `.venv/bin/python -m pytest tests/test_powerpal_download.py tests/test_sqlite_to_supabase_sync.py tests/test_powerpal_loader.py` -> `7 passed`.
+  * `.venv/bin/python scripts/refresh_powerpal_to_supabase.py --dry-run --export-url ...` -> printed redacted download/load commands.
+  * `.venv/bin/python scripts/sync_sqlite_to_supabase.py --dry-run --sqlite-path data_local/cache.sqlite --site-id test-site --days-back 7` -> passed.
+  * `bash -n pi/update.sh` -> passed.
+
+## 2026-04-25
+
 ### Annual solar, battery, and efficiency analysis dashboard
 
 * Added annual purchase-decision modelling for solar, battery, and home efficiency analysis.

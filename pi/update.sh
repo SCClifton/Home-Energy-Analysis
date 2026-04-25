@@ -61,11 +61,35 @@ echo "=== Installing project in editable mode ==="
 "$venv_pip" install -e .
 
 echo "=== Restarting services (requires sudo) ==="
+if [[ -f "$repo_root/pi/systemd/home-energy-supabase-forward-sync.service" ]]; then
+  sudo cp "$repo_root/pi/systemd/home-energy-supabase-forward-sync.service" /etc/systemd/system/
+  sudo cp "$repo_root/pi/systemd/home-energy-supabase-forward-sync.timer" /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now home-energy-supabase-forward-sync.timer
+fi
+if [[ -f "$repo_root/pi/systemd/home-energy-supabase-keepalive.service" ]]; then
+  sudo cp "$repo_root/pi/systemd/home-energy-supabase-keepalive.service" /etc/systemd/system/
+  sudo cp "$repo_root/pi/systemd/home-energy-supabase-keepalive.timer" /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now home-energy-supabase-keepalive.timer
+fi
+if [[ -f "$repo_root/pi/systemd/home-energy-simulation.service" ]]; then
+  sudo cp "$repo_root/pi/systemd/home-energy-simulation.service" /etc/systemd/system/
+  sudo cp "$repo_root/pi/systemd/home-energy-simulation.timer" /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now home-energy-simulation.timer
+fi
 if [[ -f "$repo_root/pi/systemd/home-energy-annual-analysis.service" ]]; then
   sudo cp "$repo_root/pi/systemd/home-energy-annual-analysis.service" /etc/systemd/system/
   sudo cp "$repo_root/pi/systemd/home-energy-annual-analysis.timer" /etc/systemd/system/
   sudo systemctl daemon-reload
   sudo systemctl enable --now home-energy-annual-analysis.timer
+fi
+if [[ -f "$repo_root/pi/systemd/home-energy-powerpal-refresh.service" ]]; then
+  sudo cp "$repo_root/pi/systemd/home-energy-powerpal-refresh.service" /etc/systemd/system/
+  sudo cp "$repo_root/pi/systemd/home-energy-powerpal-refresh.timer" /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now home-energy-powerpal-refresh.timer
 fi
 sudo systemctl restart home-energy-dashboard.service
 sudo systemctl restart home-energy-sync-cache.timer
@@ -76,14 +100,26 @@ if systemctl list-unit-files home-energy-annual-analysis.service --no-legend | g
   echo "=== Triggering annual analysis refresh ==="
   sudo systemctl start home-energy-annual-analysis.service || true
 fi
+if systemctl list-unit-files home-energy-powerpal-refresh.service --no-legend | grep -q home-energy-powerpal-refresh.service; then
+  echo "=== Triggering Powerpal refresh if configured ==="
+  sudo systemctl start home-energy-powerpal-refresh.service || true
+fi
 
 echo "=== Service status ==="
 echo -n "home-energy-dashboard.service: "
 systemctl is-active home-energy-dashboard.service || true
 echo -n "home-energy-sync-cache.timer: "
 systemctl is-active home-energy-sync-cache.timer || true
+echo -n "home-energy-supabase-forward-sync.timer: "
+systemctl is-active home-energy-supabase-forward-sync.timer || true
+echo -n "home-energy-supabase-keepalive.timer: "
+systemctl is-active home-energy-supabase-keepalive.timer || true
+echo -n "home-energy-simulation.timer: "
+systemctl is-active home-energy-simulation.timer || true
 echo -n "home-energy-annual-analysis.timer: "
 systemctl is-active home-energy-annual-analysis.timer || true
+echo -n "home-energy-powerpal-refresh.timer: "
+systemctl is-active home-energy-powerpal-refresh.timer || true
 
 echo "=== Health check ==="
 curl -fsS http://localhost:5050/api/health || true

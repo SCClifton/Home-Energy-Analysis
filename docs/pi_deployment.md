@@ -81,6 +81,7 @@ Keys:
 - `PORT` (5050)
 - `RETENTION_DAYS`
 - `SQLITE_PATH` (typically under `/var/lib/home-energy-analysis`) and other runtime flags used by the dashboard and cache logic
+- Optional Powerpal knobs: `POWERPAL_DEVICE_ID`, `POWERPAL_TOKEN`, `POWERPAL_SAMPLE`
 - Optional simulation knobs: `SIM_CONTROLLER`, `SIM_HISTORY_HOURS`, `SIM_FORECAST_HOURS`, `SIM_REFRESH_WEATHER`
 - Optional annual analysis knob: `ANALYSIS_YEAR` (defaults to `2025`)
 
@@ -198,7 +199,7 @@ sudo systemctl start home-energy-supabase-keepalive.service
 
 ### 4) Supabase forward sync (system-level)
 
-Daily sync of recent Amber prices and usage into Supabase (idempotent).
+Daily sync of recent Amber prices and usage into Supabase (idempotent). This also forwards recent local SQLite cache rows into Supabase with `source='sqlite-cache'`, so cached dashboard data is auditable even if an Amber re-fetch misses a row.
 
 Uses `EnvironmentFile=/etc/home-energy-analysis/dashboard.env`.
 
@@ -230,7 +231,45 @@ Run now:
 sudo systemctl start home-energy-supabase-forward-sync.service
 ```
 
-### 5) Simulation live refresh (system-level)
+### 5) Powerpal CSV refresh (system-level)
+
+Weekly refresh of Powerpal app-generated CSV exports into Supabase. If `POWERPAL_DEVICE_ID` and `POWERPAL_TOKEN` are not configured, the job exits successfully with a skip message.
+
+Uses `EnvironmentFile=/etc/home-energy-analysis/dashboard.env`.
+
+Schedule:
+
+- Sundays at 03:20
+- `Persistent=true` (runs on boot if missed)
+
+Install:
+
+```bash
+sudo cp ~/repos/Home-Energy-Analysis/pi/systemd/home-energy-powerpal-refresh.service /etc/systemd/system/
+sudo cp ~/repos/Home-Energy-Analysis/pi/systemd/home-energy-powerpal-refresh.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now home-energy-powerpal-refresh.timer
+```
+
+One-off run from a newly generated app export link:
+
+```bash
+cd ~/repos/Home-Energy-Analysis
+.venv/bin/python scripts/refresh_powerpal_to_supabase.py \
+  --export-url "https://readings.powerpal.net/csv/v1/DEVICE?token=TOKEN&start=...&end=...&sample=1" \
+  --start 2025-01-01 \
+  --end 2025-12-31
+```
+
+Check logs:
+
+```bash
+sudo systemctl status home-energy-powerpal-refresh.service --no-pager -l
+sudo systemctl status home-energy-powerpal-refresh.timer --no-pager -l
+journalctl -u home-energy-powerpal-refresh.service -n 80 --no-pager
+```
+
+### 6) Simulation live refresh (system-level)
 
 Runs the digital twin simulation every 5 minutes and persists summary + interval rows in SQLite for the `/simulation` page and simulation APIs.
 
@@ -259,7 +298,7 @@ Run now:
 sudo systemctl start home-energy-simulation.service
 ```
 
-### 6) Annual purchase-decision analysis (system-level)
+### 7) Annual purchase-decision analysis (system-level)
 
 Runs the annual solar, battery, and efficiency model and persists one cached payload in SQLite for the `/analysis` page and analysis APIs.
 
@@ -301,6 +340,7 @@ curl -fsS http://127.0.0.1:5050/api/analysis/data-quality | python -m json.tool
 sudo systemctl list-timers --all | grep home-energy
 journalctl -u home-energy-supabase-forward-sync.service -n 80 --no-pager
 journalctl -u home-energy-supabase-keepalive.service -n 50 --no-pager
+journalctl -u home-energy-powerpal-refresh.service -n 50 --no-pager
 journalctl -u home-energy-simulation.service -n 50 --no-pager
 journalctl -u home-energy-annual-analysis.service -n 50 --no-pager
 ```

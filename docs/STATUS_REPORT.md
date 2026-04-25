@@ -28,6 +28,12 @@
   - `scripts/modelling_preflight.py --year 2025`
   - `scripts/run_annual_analysis.py --year 2025 --refresh-weather`
 - Added annual analysis automated coverage (`tests/test_annual_analysis.py`, `tests/test_analysis_endpoint.py`) and verified full suite passing (`46 passed`).
+- Added Powerpal refresh and cache-forwarding operations:
+  - `scripts/refresh_powerpal_to_supabase.py` downloads app-generated CSV links and loads the manifest into Supabase.
+  - `scripts/pull_powerpal_minute_csv.py` can parse the one-off Powerpal export URL directly.
+  - `scripts/sync_sqlite_to_supabase.py` forwards recent SQLite cache rows into Supabase with `source='sqlite-cache'`.
+  - `scripts/forward_sync_supabase.py` now runs the SQLite forwarder after Amber API backfills.
+  - `pi/systemd/home-energy-powerpal-refresh.*` adds a weekly Pi timer that skips cleanly when Powerpal credentials are not configured.
 - Merged PR #17: Amber usage backfill now handles HTTP 429 with Retry-After aware throttling, backoff, and adaptive chunk sizing.
 - Merged PR #18: Powerpal loader now supports manifest dry runs with coverage diagnostics, and `scripts/compare_usage_sources.py` compares Powerpal vs Amber daily usage totals.
 - Added `scripts/verify_setup.py` for local/Pi smoke checks covering SQLite cache, dashboard endpoints, optional Supabase connectivity, and optional systemd status.
@@ -63,11 +69,11 @@
   - Supporting chart/flow generators in `scripts/`.
 
 ## Known issues and limitations
-- Powerpal minute CSV exports have historical gaps (e.g., Oct–Dec 2024) and tokens are short-lived (manual refresh required).
+- Powerpal remains an app-generated CSV/export-link workflow. Direct BLE integration is unsupported and should not be used.
 - Annual analysis recommendations are only as good as the loaded usage/price/irradiance coverage; use `scripts/modelling_preflight.py --year 2025` before relying on purchase decisions.
 - Annual PV output uses modelled Open-Meteo irradiance near Vaucluse, not measured rooftop generation or roof-shading geometry.
 - Local Supabase smoke testing still fails with `Tenant or user not found`; the configured `SUPABASE_DB_URL` needs refresh before live Supabase loads/reconciliation.
-- The 2026-04-25 read-only Pi audit could not reach `home-energy-pi` / `192.168.5.210` from this Mac (SSH timeout, ping 100% packet loss). The dashboard may still be running locally on the Pi, but LAN reachability/service state needs confirmation.
+- The Pi was found on LAN as `home-energy-pi.local` / `192.168.5.244`; the older `192.168.5.210` reference is stale.
 - Simulation weather refresh depends on Open-Meteo network reachability; fallback is cached irradiance rows only.
 
 ## What’s missing
@@ -78,7 +84,6 @@
 - Use `scripts/verify_setup.py --pi-systemd` on the Pi after pulling this branch/merge.
 
 ### P1
-- Forward sync workflow for Powerpal and Amber (weekly refresh cadence and documentation beyond the current CSV-link scripts).
 - Dashboard offline/stale UI indicators wired to existing API flags.
 - Architecture/API/data model documentation pass.
 
@@ -93,7 +98,7 @@
 Restore Supabase and Pi runtime visibility before new feature work.
 
 - Refresh the local/Pi `SUPABASE_DB_URL` and rerun `.venv/bin/python scripts/test_supabase_db.py`.
-- Confirm the Pi's current IP/SSH alias, then run `python scripts/verify_setup.py --pi-systemd` on the Pi.
+- Use `home-energy-pi.local` for Pi SSH/LAN checks, then run `python scripts/verify_setup.py --pi-systemd` on the Pi.
 - Once those pass, run `scripts/compare_usage_sources.py` for the 2025 overlap window and use the result to prioritize dashboard/backend fixes.
 - Then run `python scripts/modelling_preflight.py --year 2025` and `python scripts/run_annual_analysis.py --year 2025 --refresh-weather` to populate `/analysis`.
 
