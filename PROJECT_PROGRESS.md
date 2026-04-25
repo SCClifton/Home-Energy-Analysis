@@ -1,5 +1,29 @@
 # Project Progress
 
+## 2026-04-13
+
+### Usage baseline consolidation and reconciliation tooling
+
+* Extended Powerpal minute loader to support manifest-based batch processing and dry-run coverage summaries.
+* Added per-file and aggregate diagnostics for Powerpal exports:
+  * header-only exports are skipped cleanly;
+  * UTC timestamp parsing remains direct for `datetime_utc`;
+  * `watt_hours` remains converted to kWh;
+  * Powerpal `cost_dollars` is intentionally not mapped to `cost_aud`.
+* Local Powerpal manifest dry run found:
+  * first real interval: `2025-01-04 00:00:00+00:00` (`2025-01-04 11:00 Australia/Sydney`);
+  * last real interval: `2026-01-04 23:59:00+00:00`;
+  * aggregate valid rows before de-duplicating overlapping exports: `656,739`;
+  * duplicate interval starts from overlapping exports: `130,111`;
+  * detected gaps inside observed range: `26`;
+  * missing minutes inside observed range: `412`;
+  * Oct-Dec 2024 export attempts remain header-only.
+* Added `scripts/compare_usage_sources.py` to compare daily Supabase usage totals between Powerpal and Amber by Australia/Sydney local day.
+* Verification:
+  * `.venv/bin/python -m pytest -q` -> `35 passed`.
+  * `.venv/bin/python scripts/load_powerpal_minute_to_supabase.py --manifest data_raw/powerpal_minute/manifest_powerpal_minute.csv --dry-run` -> completed successfully.
+* Live Supabase load and reconciliation remain blocked locally because the configured Supabase URL currently fails with `Tenant or user not found`.
+
 ## 2026-02-08
 
 ### Digital twin simulation (10 kW PV + 10 kWh battery)
