@@ -1039,6 +1039,23 @@ def create_app() -> Flask:
                 }
             )
 
+        data_quality = run.get("data_quality", {})
+        if not data_quality.get("ready", False):
+            return jsonify(
+                {
+                    "status": "not_ready",
+                    "year": run["year"],
+                    "generated_at": run["generated_at"],
+                    "window_start": run["window_start"],
+                    "window_end": run["window_end"],
+                    "scenarios": [],
+                    "data_quality": data_quality,
+                    "assumptions": run.get("assumptions", {}),
+                    "updated_at": run.get("updated_at"),
+                    "message": "Annual analysis inputs are not complete enough for recommendations.",
+                }
+            )
+
         dispatch = request.args.get("dispatch")
         scenarios = run.get("scenarios", [])
         if dispatch:
@@ -1080,6 +1097,23 @@ def create_app() -> Flask:
             )
 
         recommendations = run.get("recommendations", {})
+        data_quality = run.get("data_quality", {})
+        if not data_quality.get("ready", False):
+            return jsonify(
+                {
+                    "status": "not_ready",
+                    "year": run["year"],
+                    "goal": goal,
+                    "generated_at": run["generated_at"],
+                    "recommendation": None,
+                    "recommendations": {},
+                    "sensitivity": [],
+                    "data_quality": data_quality,
+                    "assumptions": run.get("assumptions", {}),
+                    "message": "Annual analysis inputs are not complete enough for recommendations.",
+                }
+            )
+
         return jsonify(
             {
                 "status": "ok",
@@ -1105,6 +1139,19 @@ def create_app() -> Flask:
                     "year": year,
                     "load_shift": {"status": "missing", "opportunities": [], "metrics": {}, "worst_days": []},
                     "message": "No cached annual analysis run. Run scripts/run_annual_analysis.py.",
+                }
+            )
+
+        data_quality = run.get("data_quality", {})
+        if not data_quality.get("ready", False):
+            return jsonify(
+                {
+                    "status": "not_ready",
+                    "year": run["year"],
+                    "generated_at": run["generated_at"],
+                    "load_shift": {"status": "not_ready", "opportunities": [], "metrics": {}, "worst_days": []},
+                    "data_quality": data_quality,
+                    "message": "Annual usage inputs are not complete enough for load-shift analysis.",
                 }
             )
 

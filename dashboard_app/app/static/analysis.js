@@ -28,7 +28,7 @@ function renderRecommendation(payload) {
   const rec = payload?.recommendation;
   if (!rec) {
     setText("rec-title", "No cached annual analysis");
-    setText("rec-copy", "Run scripts/run_annual_analysis.py to populate recommendations from your real interval data.");
+    setText("rec-copy", payload?.message || "Run scripts/run_annual_analysis.py to populate recommendations from your real interval data.");
     return;
   }
 
@@ -50,6 +50,14 @@ function renderRecommendation(payload) {
 }
 
 function renderScenarios(payload) {
+  if (payload?.status === "not_ready") {
+    const tbody = document.getElementById("scenario-rows");
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="6">${payload.message || "Inputs are not ready for scenario comparison"}</td></tr>`;
+    }
+    return;
+  }
+
   const rows = (payload?.scenarios || [])
     .filter((row) => row.dispatch_mode === "base")
     .sort((a, b) => num(b.lifetime_net_benefit_aud) - num(a.lifetime_net_benefit_aud))
@@ -166,6 +174,14 @@ function renderBillImpact(rec) {
 }
 
 function renderLoadShift(payload) {
+  if (payload?.status === "not_ready") {
+    const el = document.getElementById("opportunity-list");
+    if (el) {
+      el.innerHTML = `<div class="list-row"><strong>Inputs not ready</strong><span>${payload.message || "Load-shift analysis needs historical usage coverage"}</span></div>`;
+    }
+    return;
+  }
+
   const loadShift = payload?.load_shift || {};
   const opportunities = loadShift.opportunities || [];
   const el = document.getElementById("opportunity-list");
