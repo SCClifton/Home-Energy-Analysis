@@ -30,10 +30,17 @@ if not logger.handlers:
 class AmberAPIError(Exception):
     """Custom exception for Amber API errors."""
 
-    def __init__(self, message: str, status_code: Optional[int] = None, response_text: Optional[str] = None):
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        response_text: Optional[str] = None,
+        response_headers: Optional[dict] = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.response_text = response_text
+        self.response_headers = response_headers or {}
 
     def __str__(self):
         base_msg = super().__str__()
@@ -77,7 +84,7 @@ class AmberClient:
         retry_strategy = Retry(
             total=3,
             backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
+            status_forcelist=[500, 502, 503, 504],
             allowed_methods=["GET", "POST"],
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
@@ -121,6 +128,7 @@ class AmberClient:
                     error_msg,
                     status_code=response.status_code,
                     response_text=response.text,
+                    response_headers=dict(response.headers),
                 )
             
             return response.json()
@@ -319,6 +327,7 @@ class AmberClient:
                     error_msg,
                     status_code=response.status_code,
                     response_text=response.text,
+                    response_headers=dict(response.headers),
                 )
         except AmberAPIError:
             raise
@@ -530,4 +539,3 @@ def main():
 
 if __name__ == "__main__":
     exit(main())
-
