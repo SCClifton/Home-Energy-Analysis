@@ -81,7 +81,7 @@ Keys:
 - `PORT` (5050)
 - `RETENTION_DAYS`
 - `SQLITE_PATH` (typically under `/var/lib/home-energy-analysis`) and other runtime flags used by the dashboard and cache logic
-- Optional Powerpal knobs: `POWERPAL_DEVICE_ID`, `POWERPAL_TOKEN`, `POWERPAL_SAMPLE`
+- Optional Powerpal knobs: either `POWERPAL_EXPORT_URL`, or `POWERPAL_DEVICE_ID`, `POWERPAL_TOKEN`, `POWERPAL_SAMPLE`
 - Optional simulation knobs: `SIM_CONTROLLER`, `SIM_HISTORY_HOURS`, `SIM_FORECAST_HOURS`, `SIM_REFRESH_WEATHER`
 - Optional annual analysis knob: `ANALYSIS_YEAR` (defaults to `2025`)
 
@@ -260,6 +260,8 @@ cd ~/repos/Home-Energy-Analysis
   --start 2025-01-01 \
   --end 2025-12-31
 ```
+
+If the link is stored as `POWERPAL_EXPORT_URL`, the script uses the embedded date range when `--start` and `--end` are omitted. To pull older windows while the same token is valid, provide explicit `--start` / `--end`; requests are split into 90-day windows.
 
 Check logs:
 

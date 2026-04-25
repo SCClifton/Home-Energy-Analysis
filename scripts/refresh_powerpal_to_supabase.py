@@ -15,6 +15,9 @@ from dotenv import load_dotenv
 
 project_root = Path(__file__).resolve().parents[1]
 load_dotenv(project_root / ".env.local", override=False)
+sys.path.insert(0, str(project_root / "scripts"))
+
+from pull_powerpal_minute_csv import parse_export_url
 
 
 def _parse_date(value: str) -> date:
@@ -56,9 +59,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--skip-when-unconfigured", action="store_true", default=True)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    export_url = args.export_url or os.getenv("POWERPAL_EXPORT_URL")
 
-    if not _has_powerpal_config(args.export_url):
-        message = "POWERPAL_DEVICE_ID/POWERPAL_TOKEN or --export-url is required"
+    if not _has_powerpal_config(export_url):
+        message = "POWERPAL_DEVICE_ID/POWERPAL_TOKEN or --export-url/POWERPAL_EXPORT_URL is required"
         if args.skip_when_unconfigured:
             print(f"Skipping Powerpal refresh: {message}")
             return 0
@@ -71,6 +75,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         start = args.start
         end = args.end
+    elif export_url:
+        try:
+            export_values = parse_export_url(export_url)
+        except Exception as exc:
+            print(f"ERROR: Could not parse Powerpal export URL: {exc}", file=sys.stderr)
+            return 1
+        start = export_values.get("start")
+        end = export_values.get("end")
+        if not isinstance(start, date) or not isinstance(end, date):
+            print("ERROR: --start and --end are required unless export URL includes start/end", file=sys.stderr)
+            return 1
     else:
         end = date.today()
         start = end - timedelta(days=args.days_back)
@@ -92,8 +107,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--overwrite",
             args.overwrite,
         ]
-        if args.export_url:
-            pull_cmd.extend(["--export-url", args.export_url])
+        if export_url:
+            pull_cmd.extend(["--export-url", export_url])
         result = run_command(pull_cmd, args.dry_run)
         if result != 0:
             return result

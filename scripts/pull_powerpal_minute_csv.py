@@ -193,9 +193,10 @@ def main() -> int:
     args = parser.parse_args()
     
     export_values: dict[str, object] = {}
-    if args.export_url:
+    export_url = args.export_url or os.getenv("POWERPAL_EXPORT_URL")
+    if export_url:
         try:
-            export_values = parse_export_url(args.export_url)
+            export_values = parse_export_url(export_url)
         except Exception as e:
             print(f"ERROR: Could not parse --export-url: {e}", file=sys.stderr)
             return 1

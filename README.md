@@ -107,7 +107,7 @@ Runtime environment is stored at `/etc/home-energy-analysis/dashboard.env` (not 
 
 Keys include `AMBER_TOKEN`, `AMBER_SITE_ID`, `SUPABASE_DB_URL`, `PORT`, `SQLITE_PATH`, `RETENTION_DAYS`, `DEBUG`.
 Simulation-specific optional keys: `SIM_CONTROLLER`, `SIM_HISTORY_HOURS`, `SIM_FORECAST_HOURS`, `SIM_REFRESH_WEATHER`.
-Powerpal refresh keys: `POWERPAL_DEVICE_ID`, `POWERPAL_TOKEN`, `POWERPAL_SAMPLE`.
+Powerpal refresh keys: either `POWERPAL_EXPORT_URL`, or `POWERPAL_DEVICE_ID`, `POWERPAL_TOKEN`, `POWERPAL_SAMPLE`.
 
 ## Local development quickstart (Mac)
 
@@ -315,6 +315,8 @@ python scripts/refresh_powerpal_to_supabase.py \
   --start 2025-01-01 \
   --end 2025-12-31
 ```
+
+Or store it temporarily in `.env.local` / the Pi env as `POWERPAL_EXPORT_URL`. If `--start` and `--end` are omitted, the script uses the date window embedded in the export URL. To backfill a longer period while the token is valid, supply your own `--start` / `--end`; the downloader will split the request into 90-day windows.
 
 Outputs CSVs to `data_raw/powerpal_minute/` with a manifest for tracking.
 
