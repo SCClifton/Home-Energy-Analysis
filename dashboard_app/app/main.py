@@ -1040,7 +1040,7 @@ def create_app() -> Flask:
             )
 
         data_quality = run.get("data_quality", {})
-        if not data_quality.get("ready", False):
+        if not data_quality.get("model_ready", data_quality.get("ready", False)):
             return jsonify(
                 {
                     "status": "not_ready",
@@ -1098,7 +1098,7 @@ def create_app() -> Flask:
 
         recommendations = run.get("recommendations", {})
         data_quality = run.get("data_quality", {})
-        if not data_quality.get("ready", False):
+        if not data_quality.get("model_ready", data_quality.get("ready", False)):
             return jsonify(
                 {
                     "status": "not_ready",
@@ -1143,7 +1143,7 @@ def create_app() -> Flask:
             )
 
         data_quality = run.get("data_quality", {})
-        if not data_quality.get("ready", False):
+        if not data_quality.get("model_ready", data_quality.get("ready", False)):
             return jsonify(
                 {
                     "status": "not_ready",

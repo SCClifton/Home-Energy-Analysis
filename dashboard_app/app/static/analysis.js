@@ -209,8 +209,9 @@ function renderQuality(payload) {
   const checks = quality.checks || {};
   const chip = document.getElementById("quality-chip");
   if (chip) {
-    chip.textContent = quality.ready ? "Ready" : "Needs data";
-    chip.className = `panel-chip ${quality.ready ? "good" : "warn"}`;
+    const modelReady = quality.model_ready ?? quality.ready;
+    chip.textContent = quality.ready ? "Complete" : (modelReady ? "Modelled" : "Needs data");
+    chip.className = `panel-chip ${modelReady ? "good" : "warn"}`;
   }
   const el = document.getElementById("quality-list");
   if (el) {

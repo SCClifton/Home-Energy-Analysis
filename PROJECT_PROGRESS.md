@@ -2,6 +2,28 @@
 
 ## 2026-04-25
 
+### Real-data analysis cache generation
+
+* Updated `scripts/run_annual_analysis.py` so annual analysis can read a Powerpal CSV manifest directly and aggregate minute readings into 5-minute usage intervals.
+* Added fallback tariff derivation from Powerpal `cost_dollars` when Amber/Supabase prices are incomplete, while still preferring cached Amber interval prices when available.
+* Added Amber historical price refresh into the annual-analysis command, with chunk-level SQLite caching and rate-limit backoff so successful chunks are retained.
+* Normalised annual-analysis price timestamps to 5-minute boundaries to handle Amber's known `+1 second` timestamp offsets.
+* Added `model_ready` data-quality semantics: full annual coverage still reports `ready=true`, but the dashboard can show clearly labelled modelled recommendations when measured usage coverage is partial and enough real data exists to build the usage profile.
+* Regenerated the local `/analysis` cache for 2025 from:
+  * Powerpal manifest: `data_raw/powerpal_minute/manifest_powerpal_minute_2026-04-25.csv`
+  * Cached Amber prices through early November 2025, with Powerpal cost fallback for remaining gaps
+  * Open-Meteo historical irradiance for Vaucluse NSW
+* Resulting data quality:
+  * Usage coverage: `68.61%` from Powerpal, with profile-filled gaps for modelling.
+  * Price coverage: `99.92%`.
+  * Irradiance coverage: `100%`.
+  * Dashboard API `/api/analysis/recommendation` now returns `status="ok"` locally.
+* Found Amber credentials in ignored `config/.env`; attempted to store them in 1Password, but the 1Password CLI could not connect to the desktop app.
+* Validation:
+  * `.venv/bin/python -m pytest` -> `50 passed`.
+
+## 2026-04-25
+
 ### Pi data refresh hardening and Powerpal collection
 
 * Added `scripts/sync_sqlite_to_supabase.py` to forward recent SQLite cache rows into Supabase with explicit `source='sqlite-cache'` provenance.

@@ -252,9 +252,18 @@ def data_quality_report(
         "irradiance": coverage(weather_df, "irradiance"),
     }
     ready = checks["usage"]["coverage_pct"] >= 90 and checks["prices"]["coverage_pct"] >= 90 and checks["irradiance"]["coverage_pct"] >= 80
+    model_ready = (
+        ready
+        or (
+            checks["usage"]["coverage_pct"] >= 60
+            and checks["prices"]["coverage_pct"] >= 90
+            and checks["irradiance"]["coverage_pct"] >= 80
+        )
+    )
 
     return {
         "ready": ready,
+        "model_ready": model_ready,
         "window_start": iso_z(start_utc),
         "window_end": iso_z(end_utc),
         "expected_5min_intervals": expected,
@@ -264,6 +273,7 @@ def data_quality_report(
             warning
             for warning in [
                 "Usage coverage is below 90%" if checks["usage"]["coverage_pct"] < 90 else None,
+                "Usage gaps are filled from the observed daily profile for scenario modelling." if not ready and model_ready else None,
                 "Price coverage is below 90%" if checks["prices"]["coverage_pct"] < 90 else None,
                 "Irradiance coverage is below 80%" if checks["irradiance"]["coverage_pct"] < 80 else None,
                 "Powerpal is treated as import/consumption only; it is not an export meter.",
