@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from email.utils import format_datetime
 
-from ingestion.amber_client import AmberAPIError
+from home_energy_analysis.ingestion import AmberAPIError
 from scripts import backfill_amber_usage_to_supabase as backfill
 
 

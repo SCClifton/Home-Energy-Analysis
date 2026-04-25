@@ -17,7 +17,7 @@ import pandas as pd
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from ingestion.amber_client import AmberClient
+from home_energy_analysis.ingestion import AmberClient
 
 
 def _parse_date(value: str) -> date:
@@ -129,4 +129,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

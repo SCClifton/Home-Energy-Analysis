@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta, date
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from ingestion.amber_client import AmberClient, AmberAPIError
+from home_energy_analysis.ingestion import AmberClient, AmberAPIError
 from home_energy_analysis.storage.factory import get_sqlite_cache
 from home_energy_analysis.storage import sqlite_cache
 
@@ -226,4 +226,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

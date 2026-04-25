@@ -24,7 +24,7 @@ import psycopg
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from ingestion.amber_client import AmberClient, AmberAPIError
+from home_energy_analysis.ingestion import AmberClient, AmberAPIError
 from home_energy_analysis.storage import supabase_db
 
 # Configure logging

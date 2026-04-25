@@ -1,13 +1,10 @@
 import os
 from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify, render_template, request
-import sys
 import sqlite3
 from zoneinfo import ZoneInfo
 
-# Add parent directory to path to import amber_client
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
-from ingestion.amber_client import AmberClient, AmberAPIError
+from home_energy_analysis.ingestion import AmberClient, AmberAPIError
 
 # Note: Developers must run 'pip install -e .' to use the packaged cache module
 from home_energy_analysis.storage.factory import get_sqlite_cache

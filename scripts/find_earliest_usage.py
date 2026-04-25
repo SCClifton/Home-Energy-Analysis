@@ -16,7 +16,7 @@ from typing import Optional, Tuple
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from ingestion.amber_client import AmberClient
+from home_energy_analysis.ingestion import AmberClient
 
 
 def _parse_args() -> argparse.Namespace:
@@ -173,4 +173,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

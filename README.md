@@ -12,7 +12,7 @@ The Pi runs as an offline-first appliance using a local SQLite cache. Supabase P
 
 3. **Digital twin simulation**: A backtest/live scenario engine for a hypothetical 10 kW PV + 10 kWh battery with export arbitrage and savings outputs for dashboard display.
 
-## Current status (2026-02-08)
+## Current status (2026-04-25)
 
 ### Working
 
@@ -21,7 +21,9 @@ The Pi runs as an offline-first appliance using a local SQLite cache. Supabase P
 - Supabase keepalive timer exists to prevent free-tier pausing.
 - Supabase forward sync runs daily and is idempotent.
 - Amber prices are backfilled into Supabase from 2024-06-16 to present.
+- Amber usage backfill has Retry-After aware throttling and adaptive chunk sizing.
 - Powerpal minute CSV pipeline downloads and loads into Supabase (from 2024-12-30 onward).
+- Powerpal/Amber daily reconciliation tooling is available for overlapping usage sources.
 - Digital twin simulation pipeline is available in both backtest and live modes:
   - Uses Supabase + SQLite cache for historical/live input data.
   - Uses Open-Meteo irradiance/weather near Vaucluse NSW for PV estimates.
@@ -31,8 +33,9 @@ The Pi runs as an offline-first appliance using a local SQLite cache. Supabase P
 ### Known limitations
 
 - Amber usage history via API is limited (older windows may return 0 rows).
-- Amber usage backfill can hit HTTP 429 rate limits (needs throttling and backoff).
 - Powerpal CSV export tokens are short-lived (manual refresh required).
+- Local Supabase smoke testing currently reaches the pooler but fails with `Tenant or user not found`; refresh `SUPABASE_DB_URL` before live reconciliation or Supabase loads.
+- The last read-only Pi audit from this Mac could not reach the documented IP (`192.168.5.210`), so live service state still needs confirmation on the LAN or at the Pi.
 - `/api/health` may show `status: stale` when the usage cache is old; this does not prevent the UI from loading.
 - Simulation weather ingestion depends on network reachability to Open-Meteo. When unavailable, simulation falls back to cached irradiance rows.
 
@@ -60,10 +63,17 @@ Supabase stores time-series data for analysis and modelling:
 |--------|---------|
 | `dashboard_app/` | Flask web app (UI and API endpoints) |
 | `scripts/` | Ingestion/backfill/simulation orchestration scripts |
+| `src/home_energy_analysis/ingestion/` | Packaged external API clients, including Amber |
 | `src/home_energy_analysis/storage/` | Storage layer (SQLite cache schema, Supabase schema and connection code) |
 | `analysis/` | Scenario engine, notebooks, and analysis utilities |
 | `docs/` | Operational docs (`pi_deployment.md` is the source of truth for Pi setup) |
 | `pi/` | Pi helper scripts (update script, service files) |
+
+Roadmap management:
+
+- GitHub issues are the durable backlog.
+- `docs/roadmap.md` is the tracked roadmap summary.
+- `TODO_v2.md` is ignored local scratch space.
 
 Local-only (gitignored):
 
@@ -132,6 +142,13 @@ Open `http://127.0.0.1:5050/` in your browser.
 
 ```bash
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
+```
+
+### Smoke checks
+
+```bash
+python scripts/verify_setup.py
+python scripts/verify_setup.py --pi-systemd
 ```
 
 ### Live UI iteration loop (recommended)
@@ -325,6 +342,7 @@ Post-deploy verification:
 curl -fsS http://127.0.0.1:5050/api/health | python -m json.tool
 curl -fsS http://127.0.0.1:5050/api/totals | python -m json.tool
 curl -fsS http://127.0.0.1:5050/api/simulation/status | python -m json.tool
+python scripts/verify_setup.py --pi-systemd
 systemctl --user status home-energy-kiosk.service --no-pager -l
 sudo systemctl list-timers --all | grep home-energy
 ```
@@ -343,7 +361,7 @@ Fixed by Chromium flags in the kiosk script (`--password-store=basic`, `--use-mo
 
 ### Amber usage 429 rate limits
 
-Reduce request rate, use smaller chunk sizes, and implement backoff. This is a known limitation that needs hardening.
+`scripts/backfill_amber_usage_to_supabase.py` supports Retry-After aware throttling, configurable backoff, and adaptive chunk sizing. Use smaller `--chunk-days`, non-zero `--base-delay`, and `--min-chunk-days 1` for cautious long backfills.
 
 ## Roadmap
 
